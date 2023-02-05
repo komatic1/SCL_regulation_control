@@ -1,0 +1,231 @@
+FUNCTION_BLOCK FB42
+TITLE =" PID step controller"
+AUTHOR : SIMATIC
+FAMILY : ICONT
+NAME : CONT_S
+VERSION : " 1.5"
+// reversed by komatic
+VAR_INPUT
+  COM_RST : BOOL ;      //полный рестарт
+  LMNR_HS : BOOL ;      //high limit signal of repeated manipulated value
+  LMNR_LS : BOOL ;      //low limit signal of repeated manipulated value
+  LMNS_ON : BOOL ;      //manipulated signals on
+  LMNUP : BOOL ;        //manipulated signal up
+  LMNDN : BOOL ;        //manipulated signal down
+  PVPER_ON : BOOL ;     //брать входную переменную из периферии
+  CYCLE : TIME  := T#1S;                //время выполнения блока
+  SP_INT : REAL ;       //внутреннее задание
+  PV_IN : REAL ;        //входная переменная
+  PV_PER : WORD ;       //входная переменная, периферия
+  GAIN : REAL  := 2.000000e+000;        //кфт пропорциональности
+  TI : TIME  := T#20S;                  //время интегрирования
+  DEADB_W : REAL  := 1.000000e+000;     //dead band width
+  PV_FAC : REAL  := 1.000000e+000;      //масштабирующий кфт входной переменной
+  PV_OFF : REAL ;       //суммирующий кфт входной переменной
+  PULSE_TM : TIME  := T#3S;             //minimum pulse time
+  BREAK_TM : TIME  := T#3S;             //minimum break time
+  MTR_TM : TIME  := T#30S;              //motor manipulated value
+  DISV : REAL ;                         //возмущающее воздействие
+END_VAR
+VAR_OUTPUT
+  QLMNUP : BOOL ;       //manipulated signal up
+  QLMNDN : BOOL ;       //manipulated signal down
+  PV : REAL ;           //process variable
+  ER : REAL ;           //error signal
+END_VAR
+VAR
+  LMNRS_ON : BOOL ;   
+  LMNRSVAL : REAL ;   
+  LMNR_SIM : REAL ;   
+  sFbPVal : REAL ;   
+  sThrOn : REAL ;   
+  siImpAus : INT ;   
+  stImpDauer : TIME ;   
+  stPausDauer : TIME ;   
+END_VAR
+VAR_TEMP
+  Hvar : REAL ;         //вспомогательная переменная
+  rCycle : REAL ;       //Abtastzeit in real
+  Istwert : REAL ;      //Istwert
+  ErKp : REAL ;         //вспомогательная переменная
+  rTi : REAL ;          //время интегрирования в real
+  AdapIn1 : REAL ;      //Eingang 1 der Adaption der Ansprechschwelle
+  AdapIn2 : REAL ;      //Eingang 2 der Adaption der Ansprechschwelle
+  iImpEin : INT ;       //Eingang des Impulsformers
+  rMtrTm : REAL ;       //Motorstellzeit in real
+  rThrOff : REAL ;      //Abschaltschwelle
+  dInteg : REAL ;       //Eingang des Integrierers in der Rьckfьhrung
+  dThrStIn : REAL ;     //three-step element input
+  LmnrSim : REAL ;      //simulierte Stellungsrьckmeldung
+END_VAR
+BEGIN
+IF COM_RST              // полный сброс
+THEN
+    LMNR_SIM:=LMNRSVAL;
+    QLMNUP:=0;
+    QLMNDN:=0;
+    PV:=0.0;
+    ER:=0.0;
+    LMNRS_ON:=0;
+    LMNRSVAL:=0.0;
+    LMNR_SIM:=0.0;
+    sFbPVal:=0.0;
+    sThrOn:=0.0;
+    siImpAus:=0;
+    stImpDauer:=T#0MS;
+    stPausDauer:=T#0MS;
+ELSE
+    Istwert:=INT_TO_REAL(WORD_TO_INT(PV_PER))*3.616898e-003;
+    Istwert:=Istwert*PV_FAC+PV_OFF;
+    IF NOT PVPER_ON THEN Istwert:=PV_IN; END_IF;
+    PV:=Istwert;
+    ErKp:=SP_INT-PV;
+    IF    ErKp < (-DEADB_W) THEN  ER:=ErKp+DEADB_W;
+    ELSIF ErKp>DEADB_W      THEN  ER:=ErKp-DEADB_W;
+    ELSE  ER:=0.0; END_IF;
+    ErKp:=ER*GAIN;
+    rCycle:=DINT_TO_REAL(TIME_TO_DINT(CYCLE))/1000.0;
+    rTi:=DINT_TO_REAL(TIME_TO_DINT(TI))/1000.0;
+    IF rTi<rCycle*0.5 THEN rTi:=rCycle*0.5; END_IF;
+    rMtrTm:=DINT_TO_REAL(TIME_TO_DINT(MTR_TM))/1000.0;
+    Hvar:=rTi-ABS(0.01*ErKp*rMtrTm);
+    IF Hvar<(rTi*0.1)THEN rTi:=rTi*0.1; ELSE rTi:=Hvar; END_IF; 
+    IF LMNS_ON
+    THEN
+        sFbPVal:=0.0;
+    ELSE 
+        IF siImpAus<>0
+        THEN 
+            dInteg:=DINT_TO_REAL(INT_TO_DINT(siImpAus))*rCycle/rMtrTm;
+        ELSE
+            IF (ErKp>0.0 AND LMNR_HS) OR (ErKp<0.0 AND LMNR_LS) OR (TI=T#0MS) 
+            THEN
+                dInteg:=0.0;
+            ELSE   
+                dInteg := (-ErKp)*rCycle/rTi;
+            END_IF;
+        END_IF;
+        sFbPVal:=sFbPVal+dInteg;
+        IF TI=T#0MS
+        THEN 
+            IF    sFbPVal>100.0 THEN sFbPVal:=100.0;
+            ELSIF sFbPVal<0.0   THEN sFbPVal:=0.0;
+            END_IF;
+        END_IF;   
+    END_IF;       
+    dThrStIn:=ErKp-sFbPVal+DISV;
+    AdapIn1:=ErKp;
+    AdapIn2:=sFbPVal;
+    rThrOff:=55.0/rMtrTm*rCycle;
+    IF PULSE_TM>CYCLE
+    THEN 
+    Hvar:=DINT_TO_REAL(TIME_TO_DINT(PULSE_TM))/1000.0;
+    ELSE
+    Hvar:=rCycle;
+    END_IF;
+    Hvar:=100.0*Hvar/rMtrTm;
+    IF NOT(LMNR_HS OR LMNR_LS)
+    THEN
+        IF NOT (QLMNUP OR QLMNDN)
+        THEN
+            IF TI<>T#0MS
+            THEN
+                IF ABS(AdapIn1)<ABS(AdapIn2)
+                THEN
+                    sThrOn:=AdapIn1;
+                ELSE    
+                    sThrOn:=AdapIn2;
+                END_IF;
+            ELSE
+                IF Istwert=0.0
+                THEN
+                    sThrOn:=Hvar;
+                ELSE
+                    sThrOn:=ABS(ErKp)*0.5;
+                END_IF;
+            END_IF;
+            IF sThrOn>10.0 THEN sThrOn:=10.0; END_IF;
+            IF sThrOn<Hvar THEN sThrOn:=Hvar; END_IF;            
+        END_IF;           
+    ELSE 
+        sThrOn:=Hvar;
+    END_IF;     
+    IF (siImpAus=100 AND dThrStIn>rThrOff) OR (dThrStIn>=sThrOn)             THEN iImpEin:=100;
+    ELSIF (siImpAus=-100 AND dThrStIn<(-rThrOff)) OR (dThrStIn<=(-sThrOn))   THEN iImpEin:=-100;
+    ELSE                                                                          iImpEin:=0;     
+    END_IF;
+    IF  LMNS_ON
+    THEN
+        IF LMNUP XOR LMNDN 
+        THEN
+            IF LMNUP
+            THEN
+                iImpEin:=100;
+            ELSE
+                iImpEin:=-100;
+            END_IF;
+        ELSE
+            iImpEin:=0;
+        END_IF;
+    END_IF;   
+    IF (iImpEin=100 AND LMNR_HS) OR (iImpEin=-100 AND LMNR_LS) THEN iImpEin:=0; END_IF;
+    IF (siImpAus=-100 AND iImpEin=100) OR (siImpAus=100 AND iImpEin=-100)THEN iImpEin:=0; END_IF;
+    IF siImpAus<>iImpEin
+    THEN
+        IF iImpEin=0
+        THEN
+            IF stImpDauer<=T#0MS
+            THEN
+                siImpAus:=0;
+                stPausDauer:=BREAK_TM;
+            END_IF;
+        ELSE
+            siImpAus:=iImpEin;
+            stImpDauer:=PULSE_TM;
+        END_IF;
+    END_IF;
+    IF stImpDauer>T#0MS
+    THEN
+    stImpDauer:=stImpDauer-CYCLE;
+    ELSE
+    stImpDauer:=T#0MS;
+    END_IF;
+    IF stPausDauer>T#0MS
+    THEN
+    stPausDauer:=stPausDauer-CYCLE;
+    ELSE 
+    stPausDauer:=T#0MS;
+    END_IF;
+    IF ((siImpAus=100) AND LMNR_HS) OR ((siImpAus=-100) AND LMNR_LS)
+    THEN
+      siImpAus:=0;
+      stImpDauer:=T#0MS;
+    END_IF;
+    IF NOT LMNRS_ON
+    THEN
+        LmnrSim:=LMNRSVAL;
+    ELSE
+        LmnrSim:=DINT_TO_REAL(INT_TO_DINT(siImpAus))*rCycle/rMtrTm+LMNR_SIM;
+        IF LmnrSim>=100.0
+        THEN
+            LmnrSim:=100.0;
+        ELSIF  LmnrSim<=0.0
+        THEN
+            LmnrSim:=0.0;
+        END_IF;
+    END_IF;
+    LMNR_SIM:=LmnrSim;
+    IF siImpAus=0
+    THEN
+           QLMNUP:=0;
+           QLMNDN:=0;
+    ELSIF siImpAus=100
+    THEN
+        QLMNUP:=1;
+              QLMNDN:=0;
+    ELSE
+           QLMNUP:=0;
+           QLMNDN:=1;
+    END_IF;
+END_IF;
+END_FUNCTION_BLOCK

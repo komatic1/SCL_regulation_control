@@ -1,0 +1,300 @@
+FUNCTION_BLOCK FB59
+
+TITLE =" PI temperature step controller" 
+{ S7_techparam := " S7WRTX.TCONT_S"  }
+
+AUTHOR : SIMATIC
+FAMILY : CONTROL
+NAME : TCONT_S
+VERSION : " 1.0"
+
+VAR_INPUT
+CYCLE :REAL:=1.000000e-001;    //sample time
+SP_INT :      REAL ;      //internal setpoint    
+PV_IN :       REAL ;      //process variable in    
+PV_PER :      INT ;       //process variable peripherie    
+DISV :        REAL ;      //disturbance variable    
+LMNR_HS :     BOOL ;      //high limit signal of repeated manipulated value    
+LMNR_LS :     BOOL ;      //low limit signal of repeated manipulated value    
+LMNS_ON :     BOOL  := TRUE;    //manipulated signals on    
+LMNUP :       BOOL ;      //manipulated signal up    
+LMNDN :       BOOL ;      //manipulated signal down  
+END_VAR  
+VAR_OUTPUT    
+QLMNUP :      BOOL ;      //manipulated signal up    
+QLMNDN :      BOOL ;      //manipulated signal down    
+PV :          REAL ;      //process variable    
+ER :          REAL ;      //error signal  
+END_VAR
+VAR_IN_OUT    
+COM_RST :     BOOL ;      //complete restart  
+END_VAR  
+VAR    
+PV_FAC :      REAL  := 1.000000e+000;    //process variable factor    
+PV_OFFS :     REAL ;      //process variable offset    
+DEADB_W :     REAL ;      //dead band width    
+PFAC_SP :     REAL  := 1.000000e+000;    //proportional factor for setpoint changes [0..1]    
+GAIN :        REAL  := 2.000000e+000;    //proportional gain    
+TI :          REAL  := 4.000000e+001;    //reset time    
+MTR_TM :      REAL  := 3.000000e+001;    //motor actuating time    
+PULSE_TM :    REAL ;      //minimum pulse time    
+BREAK_TM :    REAL ;      //minimum break time    
+PER_MODE :    INT ;       //periphery mode: 0=standard, 1=climate, 2=voltage/current    
+PVPER_ON :    BOOL ;      //process variable peripherie on    
+sFbPVal :     REAL ;        
+sThrOn :      REAL ;        
+siImpAus :    INT ;        
+stImpDauer :  REAL ;    
+stPausDauer : REAL ;        
+srSpOld :     REAL ;        
+srDiffSp :    REAL ;  
+END_VAR  
+VAR_TEMP    
+gf :          REAL ;      //Hilfsvariable    
+Hvar :        REAL ;      //Hilfsvariable    
+rCycle :      REAL ;      //Abtastzeit in real    
+Istwert :     REAL ;      //Istwert    
+ErKp :        REAL ;      //Hilfsvariable    
+rTi :         REAL ;      //Integrationszeit in real    
+AdapIn1 :     REAL ;      //Eingang 1 der Adaption der Ansprechschwelle    
+AdapIn2 :     REAL ;      //Eingang 2 der Adaption der Ansprechschwelle    
+iImpEin :     INT ;       //Eingang des Impulsformers    
+rMtrTm :      REAL ;      //Motorstellzeit in real    
+rThrOff :     REAL ;      //Abschaltschwelle    
+dInteg :      REAL ;      //Eingang des Integrierers in der Rьckfьhrung    
+dThrStIn :    REAL ;      //three-step element input    
+LmnrSim :     REAL ;      //simulierte Stellungsrьckmeldung    
+rSpDelt :     REAL ;      //setpoint change  
+END_VAR
+BEGIN
+IF COM_RST 
+THEN          
+	LMNUP := FALSE ; 
+    QLMNDN := FALSE ;
+    PV := 0.0 ;
+          ER := 0.0 ;
+          srDiffSp := 0.0 ;
+          sFbPVal := 0.0 ;
+          sThrOn := 0.0 ;
+          siImpAus := 0 ;
+          stImpDauer := 0.0 ;
+          stPausDauer := 0.0 ;
+          COM_RST := FALSE ;
+ELSE          
+	IF PVPER_ON 
+	  THEN  
+            IF PER_MODE = 1
+ THEN
+                  Istwert := DINT_TO_REAL( INT_TO_DINT(PV_PER ) ) * 0.01 ;
+              ELSIF PER_MODE = 2
+ THEN //A7D3
+                  Istwert := DINT_TO_REAL( INT_TO_DINT(PV_PER ) ) * 0.003616898 ;
+              ELSE                  Istwert := DINT_TO_REAL( INT_TO_DINT(PV_PER ) ) * 0.1 ;
+              END_IF;
+              Istwert := Istwert * PV_FAC + PV_OFFS;
+          ELSE              Istwert := PV_IN ;
+          END_IF;
+          PV := Istwert ;
+          ErKp := SP_INT - Istwert ;
+          IF ErKp < - DEADB_W
+ THEN
+              ER := ErKp + DEADB_W ;
+          ELSIF ErKp > DEADB_W
+ THEN
+              ER := ErKp - DEADB_W ;
+          ELSE              ER := 0.0 ;
+          END_IF;
+          ErKp := ER * GAIN ;
+          rCycle := CYCLE ;
+          IF rCycle < 0.001
+ THEN
+              rCycle := 0.001 ;
+          END_IF;
+          rTi := TI ;
+          IF rTi < rCycle * 0.5
+ THEN
+              rTi := rCycle * 0.5 ;
+          END_IF ;
+          rMtrTm := MTR_TM ;
+          IF rMtrTm < 0.001
+ THEN
+              rMtrTm := 0.001 ;
+          END_IF ;
+          Hvar := rTi - ABS( 0.01 * ErKp * rMtrTm ) ;
+          IF Hvar < 0.1 * rTi
+ THEN
+              rTi := 0.1 * rTi ;
+          ELSE
+              rTi := Hvar ;
+          END_IF ;
+          IF LMNS_ON
+ THEN
+              sFbPVal := 0.0 ;
+              srDiffSp := 0.0 ;
+          ELSE
+              rSpDelt := SP_INT - srSpOld ;
+              IF PFAC_SP > 1.0
+ THEN 
+                 PFAC_SP := 1.0 ;
+              ELSIF PFAC_SP < 0.0 
+THEN 
+                 PFAC_SP := 0.0 ;
+              END_IF ;
+              IF PFAC_SP > 0.5
+ THEN 
+                 gf := 1.0 - PFAC_SP ;
+              ELSE
+                  gf := PFAC_SP ;
+              END_IF ;
+              Hvar := GAIN * rSpDelt * (PFAC_SP - 1.0 - gf ) ;
+              srDiffSp := GAIN * rSpDelt * gf + srDiffSp ;
+              srDiffSp := srDiffSp * gf * TI / ( gf * TI + rCycle ) ;
+              IF siImpAus <> 0 
+THEN   
+               dInteg := DINT_TO_REAL( INT_TO_DINT(siImpAus ) ) * rCycle / rMtrTm ;
+              ELSIF ( ErKp > 0.0 AND LMNR_HS ) OR (ErKp < 0.0 AND LMNR_LS ) OR TI = 0.0
+ THEN
+                  dIntEg := 0.0 ;
+              ELSE 
+                 dInteg := - ErKp * rCycle / rTi;
+                  IF dInteg > 20.0
+ THEN   
+                   dInteg := 20.0 ;
+                  ELSIF dInteg < -20.0
+ THEN  
+                    dInteg := -20.0 ;
+                  END_IF ;
+              END_IF ;
+              sFbPVal := sFbPVal + dInteg - Hvar ; 
+             IF TI = 0.0
+ THEN
+                  IF sFbPVal > 100.0
+ THEN 
+                     sFbPVal := 100.0 ;
+                  ELSIF sFbPVal < 0.0
+ THEN 
+                     sFbPVal := 0.0 ;
+                  END_IF ;  
+            END_IF ;  
+        END_IF ; 
+         dThrStIn := ErKp - sFbPVal + DISV + srDiffSp ; 
+         AdapIn1 := ErKp ;
+          AdapIn2 := sFbPVal ;
+          rThrOff := 55.0 / rMtrTm * rCycle ;
+          IF PULSE_TM > rCycle
+ THEN
+              Hvar := PULSE_TM ;
+          ELSE
+              Hvar := rCycle ;
+          END_IF ; 
+         Hvar := 100.0 * Hvar / rMtrTm ; 
+         IF NOT ( LMNR_HS OR LMNR_LS )
+ THEN 
+             IF NOT ( QLMNUP OR QLMNDN )
+ THEN 
+                 IF TI <> 0.0 
+THEN  
+                    AdapIn1 := ABS( AdapIn1 );
+                      AdapIn2 := ABS( AdapIn2 );
+                      IF AdapIn1 < AdapIn2
+ THEN  
+                        sThrOn := AdapIn1 ;
+                      ELSE 
+                         sThrOn := AdapIn2 ; 
+                     END_IF ;
+                  ELSIF Istwert = 0.0 
+THEN 
+                     sThrOn := Hvar ;
+                  ELSE   
+                   sThrOn := ABS( ErKp ) * 0.5 ;
+                  END_IF ;
+                  IF sThrOn > 10.0
+ THEN   
+                   sThrOn := 10.0 ;
+                  END_IF ;
+                  IF sThrOn < Hvar
+ THEN 
+                     sThrOn := Hvar ; 
+                 END_IF ;
+              END_IF ;
+          ELSE 
+             sThrOn := Hvar ;
+          END_IF ; 
+         IF siImpAus = 100 AND dThrStIn > rThrOff OR dThrStIn >= sThrOn
+ THEN 
+             iImpEin := 100 ;
+          ELSIF siImpAus = -100 AND dThrStIn < - rThrOff OR dThrStIn <= - sThrOn
+ THEN 
+             iImpEin := -100 ; 
+         ELSE 
+             iImpEin := 0 ;
+          END_IF ; 
+         IF LMNS_ON
+ THEN  
+            IF LMNUP XOR LMNDN
+ THEN  
+                IF LMNUP
+ THEN 
+                     iImpEin := 100 ;
+                  ELSE 
+                     iImpEin := -100 ;
+                  END_IF ; 
+             ELSE 
+                 iImpEin := 0 ;
+              END_IF ;
+          END_IF ;  
+        IF ( iImpEin = 100 AND LMNR_HS ) OR (    iImpEin = -100 AND LMNR_LS )
+ THEN  
+            iImpEin := 0 ;
+          END_IF ; 
+         IF ( siImpAus = -100 AND iImpEin = 100 ) OR ( siImpAus = 100 AND iImpEin = -100 )
+ THEN  
+            iImpEin := 0 ;
+          END_IF ; 
+         IF siImpAus <> iImpEin 
+THEN   
+           IF iImpEin = 0
+ THEN  
+                IF stImpDauer <= 0.0
+ THEN 
+                     siImpAus := 0 ; 
+                     stPausDauer := BREAK_TM ;
+                  END_IF ;
+              ELSIF stPausDauer <= 0.0
+ THEN  
+                siImpAus := iImpEin ; 
+                 stImpDauer := PULSE_TM ;
+              END_IF ;
+          END_IF ;
+          IF stImpDauer > 0.0
+ THEN 
+             stImpDauer := stImpDauer - rCycle ;
+          ELSE 
+             stImpDauer := 0.0 ;
+          END_IF ;
+          IF stPausDauer > 0.0
+ THEN         
+     stPausDauer := stPausDauer - rCycle ; 
+         ELSE 
+             stPausDauer := 0.0 ;
+          END_IF ;
+          IF ( siImpAus = 100 AND LMNR_HS ) OR (    siImpAus = -100 AND LMNR_LS)
+ THEN  
+            siImpAus := 0 ; 
+             stImpDauer := 0.0 ;
+          END_IF ; 
+         IF siImpAus = 0
+ THEN  
+            QLMNUP := FALSE ; 
+             QLMNDN := FALSE ;
+          ELSIF siImpAus = 100
+ THEN   
+           QLMNUP := TRUE ; 
+             QLMNDN := FALSE ;
+          ELSE
+              QLMNUP := FALSE ;
+              QLMNDN := TRUE ;
+          END_IF ;
+      END_IF ; 
+     srSpOld := SP_INT ;  
+END_FUNCTION_BLOCK

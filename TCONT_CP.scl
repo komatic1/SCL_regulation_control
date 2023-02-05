@@ -1,0 +1,1076 @@
+FUNCTION_BLOCK FB58
+  TITLE =" PID temperature controller with pulse generator and self-tuning"
+  { S7_techparam := " S7WRTX.TCONT_CP" }
+  AUTHOR : SIMATIC
+  FAMILY : CONTROL
+  NAME : TCONT_CP
+  VERSION : " 1.1"
+  VAR_INPUT
+    PV_IN :       REAL ;        //process variable in
+    PV_PER :      INT ;         //process variable peripherie
+    DISV :        REAL ;        //disturbance variable
+    INT_HPOS :    BOOL ;        //integral action hold in positive direction
+    INT_HNEG :    BOOL ;        //integral action hold in negative direction
+    SELECT :      INT ;         //selection of call PID and pulse generator
+  END_VAR
+  VAR_OUTPUT
+    PV :          REAL ;        //process variable
+    LMN :         REAL ;        //manipulated variable
+    LMN_PER :     INT ;         //manipulated variable peripherie
+    QPULSE :      BOOL ;        //output pulse signal
+    QLMN_HLM :    BOOL ;        //high limit of manipulated variable reached
+    QLMN_LLM :    BOOL ;        //low limit of manipulated variable reached
+    QC_ACT :      BOOL  := TRUE;//next cycle, the continuous controller is working
+  END_VAR
+  VAR_IN_OUT
+    CYCLE :       REAL  := 1.000000e-001;    //sample time of continuous controller [s]
+    CYCLE_P :     REAL  := 2.000000e-002;    //sample time of pulse generator [s]
+    SP_INT :      REAL ;        //internal setpoint
+    MAN :         REAL ;        //manual value
+    COM_RST :     BOOL ;        //complete restart
+    MAN_ON :      BOOL  := TRUE;//manual operation on
+  END_VAR
+  VAR
+    DEADB_W :     REAL ;        //dead band width
+    I_ITLVAL :    REAL ;        //initialization value of the integral action
+    LMN_HLM :     REAL  := 1.000000e+002;    //manipulated variable high limit
+    LMN_LLM :     REAL ;        //manipulated variable low limit
+    PV_FAC :      REAL  := 1.000000e+000;    //process variable factor
+    PV_OFFS :     REAL ;        //process variable offset
+    LMN_FAC :     REAL  := 1.000000e+000;    //manipulated variable factor
+    LMN_OFFS :    REAL ;        //manipulated variable offset
+    PER_TM :      REAL  := 1.000000e+000;    //period time [s]
+    P_B_TM :      REAL ;        //minimum pulse/break time [s]
+    TUN_DLMN :    REAL  := 2.000000e+001;    //delta manipulated variable for process excitation
+    PER_MODE :    INT ;         //periphery mode: 0=standard, 1=climate, 2=voltage/current
+    PVPER_ON :    BOOL ;        //process variable periphery on
+    I_ITL_ON :    BOOL ;        //initialization of the integral action on
+    PULSE_ON :    BOOL ;        //pulse generator on
+    TUN_KEEP :    BOOL ;        //keep tuning on (common tuning with other controllers)
+    ER :          REAL ;        //error signal
+    LMN_P :       REAL ;        //proportionality component
+    LMN_I :       REAL ;        //integral component
+    LMN_D :       REAL ;        //derivative component
+    PHASE :       INT ;         //phase of self tuning (0..7)
+    STATUS_H :    INT ;         //status heating of self tuning
+    STATUS_D :    INT ;         //status controller design of self tuning
+    QTUN_RUN :    BOOL ;        //tuning is active (phase 2)
+    PI_CON : STRUCT    
+     GAIN :       REAL ;        //PI proportional gain
+     TI :         REAL ;        //PI reset time [s]
+    END_STRUCT ;   
+    PID_CON : STRUCT    
+     GAIN :       REAL ;        //PID proportional gain
+     TI :         REAL ;        //PID reset time [s]
+     TD :         REAL ;        //PID derivative time [s]
+    END_STRUCT ;   
+    PAR_SAVE : STRUCT    
+     PFAC_SP :    REAL  := 1.000000e+000;    //saved proportional factor for setpoint changes [0..1]
+     GAIN :       REAL ;        //saved proportional gain
+     TI :         REAL ;        //saved reset time [s]
+     TD :         REAL ;        //saved derivative time [s]
+     D_F :        REAL  := 5.000000e+000;    //saved derivative factor TD/TM_LAG (5..10)
+     CON_ZONE :   REAL  := 1.000000e+002;    //saved control zone
+     CONZ_ON :    BOOL ;        //saved control zone active
+    END_STRUCT ;   
+    PFAC_SP :     REAL  := 1.000000e+000;    //proportional factor for setpoint changes [0..1]
+    GAIN :        REAL  := 2.000000e+000;    //proportional gain
+    TI :          REAL  := 4.000000e+001;    //reset time [s]
+    TD :          REAL  := 1.000000e+001;    //derivative time [s]
+    D_F :         REAL  := 5.000000e+000;    //derivative factor TD/TM_LAG (5..10)
+    CON_ZONE :    REAL  := 1.000000e+002;    //control zone
+    CONZ_ON :     BOOL ;        //control zone active
+    TUN_ON :      BOOL ;        //self tuning on
+    TUN_ST :      BOOL ;        //start self tuning (with constant SP)
+    UNDO_PAR :    BOOL ;        //undo change of controller parameters
+    SAVE_PAR :    BOOL ;        //save current controller parameters
+    LOAD_PID :    BOOL ;        //load optimized PI/PID parameters
+    PID_ON :      BOOL  := TRUE;    //PID mode on
+    GAIN_P :      REAL ;        //process proportional gain
+    TU :          REAL ;        //delay time [s]
+    TA :          REAL ;        //recovery time [s]
+    KIG :         REAL ;        //maximal ascent ratio of PV
+    N_PTN :       REAL ;        //process order
+    TM_LAG_P :    REAL ;        //process time lag for PTN model [s]
+    T_P_INF :     REAL ;        //time to point of inflection [s]
+    P_INF :       REAL ;        //PV at point of inflection - PV0
+    LMN0 :        REAL ;        //manipulated variable at begin of tuning
+    PV0 :         REAL ;        //process value at begin of tuning
+    PVDT0 :       REAL ;        //rate of change of PV at begin of tuning [1/s]
+    PVDT :        REAL ;        //current rate of change of PV [1/s]
+    PVDT_MAX :    REAL ;        //Max. rate of change of PV per second [1/s]
+    NOI_PVDT :    REAL ;        //ratio of noise in PVDT_MAX in %
+    NOISE_PV :    REAL ;        //absolute noise in PV
+    FIL_CYC :     INT  := 1;    //No of cycles for mean-value filter
+    POI_CMAX :    INT ;         //max No of cycles after point of inflection
+    POI_CYCL :    INT ;         //No of cycles after point of inflection
+    sctFil :      INT ;   
+    srPv :        REAL ;   
+    srNoise :     REAL ;   
+    srPvdt2 :     REAL ;   
+    srPvdtMax2 :  REAL ;   
+    srNoise2 :    REAL ;   
+    srPvOld2 :    REAL ;   
+    siStatus :    INT ;   
+    siSpDir :     INT ;   
+    srTime :      REAL ;   
+    sPvOld :      REAL ;   
+    sSpOld :      REAL ;   
+    srPvMin :     REAL ;   
+    srPVsim :     REAL ;   
+    srEffDlmn :   REAL ;   
+    sInvAlt :     REAL ;   
+    sIanteilAlt : REAL ;   
+    sRestInt :    REAL ;   
+    sRestDif :    REAL ;   
+    sRueck :      REAL ;   
+    sLmn :        REAL ;   
+    spassPTm :    REAL ;   
+    sCycTmPass :  REAL ;   
+    sPTm :        REAL ;   
+    srOptLmn :    REAL ;   
+    sbOptLmn :    BOOL ;   
+    sbConzOn :    BOOL ;   
+    sbSpChange :  BOOL ;   
+    sbReOpt :     BOOL ;   
+    sLmnHlmOld :  REAL  := 1.000000e+002;   
+    sLmnLlmOld :  REAL ;   
+    srDiffSp :    REAL ;   
+    siTime :      DINT ;   
+    siCycle :     DINT ;   
+    siCycleP :    DINT ;   
+    siPulsFil :   INT ;   
+    srPulsPv :    REAL ;   
+    srDPvdt :     REAL ;   
+    srDPvdt2 :    REAL ;   
+    sNpInf :      REAL ;   
+    sCycleM :     REAL ;   
+    sGf11_30 :    REAL ;   
+    sGf12_30 :    REAL ;   
+    sGf21_30 :    REAL ;   
+    sGf22_30 :    REAL ;   
+    sPv0Sim_30 :  REAL ;   
+    srPVsim3_30 : REAL ;   
+    srPVsim2_30 : REAL ;   
+    srPVsim1_30 : REAL ;   
+    srDelPvsim_30 : REAL ;   
+    sGf11_20 :    REAL ;   
+    sGf12_20 :    REAL ;   
+    sGf21_20 :    REAL ;   
+    sGf22_20 :    REAL ;   
+    sPv0Sim_20 :  REAL ;   
+    srPVsim2_20 : REAL ;   
+    srPVsim1_20 : REAL ;   
+    srDelPvsim_20 : REAL ;   
+    sGf11_15 :    REAL ;   
+    sGf12_15 :    REAL ;   
+    sGf21_15 :    REAL ;   
+    sGf22_15 :    REAL ;   
+    sPv0Sim_15 :  REAL ;   
+    srPVsim2_15 : REAL ;   
+    srPVsim1_15 : REAL ;   
+    srDelPvsim_15 : REAL ;   
+  END_VAR
+  VAR_TEMP
+    tTime :       TIME ;    //time measurement
+    iTime :       DINT ;    //time measurement
+    rErKp :       REAL ;    //Hilfsvariable
+    rDiff :       REAL ;    //Дnderungswert
+    rDiff_int :   REAL ;    //internal control error for control zone
+    Verstaerk :   REAL ;    //Verstдrkung
+    RueckDiff :   REAL ;    //Differenz des Rьckkopplungswertes
+    RueckAlt :    REAL ;    //Alter Rьckkopplungswert
+    dLmn :        REAL ;    //Stellwert
+    bUpp :        BOOL ;    //aktueller Zustand von QPVURLMP
+    bDownp :      BOOL ;    //aktueller Zustand von QPVDRLMP
+    bUpn :        BOOL ;    //aktueller Zustand von QPVURLMN
+    bDownn :      BOOL ;    //aktueller Zustand von QPVDRLMN
+    bHvar :       BOOL ;    //Hilfsvariable
+    bIZv :        BOOL ;    //Impulszeit / Pausenzeit verlдngern
+    bLMNnew :     BOOL ;    //PID-Regler hat eine neue StellgrцЯe berechnet
+    bPulse :      BOOL ;    //pulse generator is executed
+    bConzOn :     BOOL ;    //control zone exceeded (current cycle)
+    rSeek :       REAL ;    //seek range for point of inflection
+    rPvDelt :     REAL ;    //change of Pv since tuning start
+    rPvFil :      REAL ;    //filtered process variable
+    rPV0 :        REAL ;    //unsigned PV0 for internal use
+    rPvdtOri :    REAL ;    //original rPvdt (unlimited by ramp) [1/s]
+    rPVsigned :   REAL ;    //filtered PV whose sign is not changed by SpDir
+    rSpDelt :     REAL ;    //setpoint change
+    tw_durch_tu : REAL ;    //Verhдltnis Wendepunktzeit zu Verzugszeit
+    gf :          REAL ;    //Hilfwert
+    koeff :       REAL ;    //Koeffizient
+    rCycle :      REAL ;    //increased Cycle due TO additional filter
+    rTmLag :      REAL ;    //= TD/D_F
+    rDeltaI :     REAL ;    //change of integral part
+    rVal :        REAL ;    //Real Hilfsvariable
+    rPvNew2 :     REAL ;    //parallel new PV with twice as many filter cycles
+    rNoiPvdt :    REAL ;    //Noise / PvdtMax * 100
+    rPvdtMax0 :   REAL ;    //PVDT_MAX - PVDT0;
+    rPVin :       REAL ;    //PV input for pulse cycle mean value filter
+    rP_B_TM :     REAL ;    //internal minimum pulse/break time [s]
+    rPvdt :       REAL ;    //internal current rate of change of PV [1/s]
+    rPvdt2 :      REAL ;    //parallel gradient with twice as many filter cycles
+    rPvdt3 :      REAL ;    //start value for srPvdt2
+    rLmnPmod :    REAL ;    //proportionality component modified for CON_ZONE 
+    iFilCyc :     INT ;     //internal: No of cycles for mean-value filter
+    iVal :        INT ;   
+    rT1sim :      REAL ;    //Zeitkonstante der Simulation
+    rT2sim :      REAL ;    //Zeitkonstante der Simulation
+    rKsim :       REAL ;    //Verstдrkung der Simulation
+    rSumHp :      REAL ;    //Summe zur Simulation mit Ordnung rHp
+    rSumLp :      REAL ;    //Summe zur Simulation mit Ordnung rLp
+    rHp :         REAL ;    //nдchst hцhere Ordnung Simulation
+    rLp :         REAL ;    //nдchst niedrigere Ordnung Simulation
+    rNptn :       REAL ;    //Ordnung bestimmt durch Simulation 
+    rNptnHl :     REAL ;    //Obergrenze der Ordnung bestimmt durch Simulation 
+    rNptnLl :     REAL ;    //Untergrenze der Ordnung bestimmt durch Simulation 
+  END_VAR
+      IF COM_RST THEN
+          PV := 0.0 ;
+          ER := 0.0 ;
+          LMN_P := 0.0 ;
+          LMN_I := 0.0 ;
+          LMN_D := 0.0 ;
+          LMN := 0.0 ;
+          LMN_PER := 0 ;
+          PHASE := 0 ;
+          QLMN_HLM := FALSE ;
+          QLMN_LLM := FALSE ;
+          QC_ACT := TRUE ;
+          QPULSE := FALSE ;
+          TUN_ON := FALSE ;
+          UNDO_PAR := FALSE ;
+          SAVE_PAR := FALSE ;
+          LOAD_PID := FALSE ;
+          sInvAlt := 0.0 ;
+          sIanTeilAlt := I_ITLVAL ;
+          sRestInt := 0.0 ;
+          sRestDif := 0.0 ;
+          sRueck := 0.0 ;
+          sLmn := 0.0 ;
+          srDiffSp := 0.0 ;
+          siPulsFil := 0 ;
+          srPulsPv := 0.0 ;
+          spassPTm := 0.0 ;
+          sCycTmPass := 0.0 ;
+          sPTm := 0.0 ;
+          sbConzOn := FALSE ;
+          sbReOpt := FALSE ;
+          sGf11_30 := 0.0 ;
+          sGf12_30 := 0.0 ;
+          sGf21_30 := 0.0 ;
+          sGf22_30 := 0.0 ;
+          sPv0Sim_30 := 0.0 ;
+          srPVsim3_30 := 0.0 ;
+          srPVsim2_30 := 0.0 ;
+          srPVsim1_30 := 0.0 ;
+          srDelPvsim_30 := 0.0 ;
+          sGf11_20 := 0.0 ;
+          sGf12_20 := 0.0 ;
+          sGf21_20 := 0.0 ;
+          sGf22_20 := 0.0 ;
+          sPv0Sim_20 := 0.0 ;
+          srPVsim1_20 := 0.0 ;
+          srPVsim2_20 := 0.0 ;
+          srDelPvsim_20 := 0.0 ;
+          sGf11_15 := 0.0 ;
+          sGf12_15 := 0.0 ;
+          sGf21_15 := 0.0 ;
+          sGf22_15 := 0.0 ;
+          sPv0Sim_15 := 0.0 ;
+          srPVsim1_15 := 0.0 ;
+          srPVsim2_15 := 0.0 ;
+          srDelPvsim_15 := 0.0 ;
+          COM_RST := FALSE ;
+      ELSE
+          bLMNnew := NOT PULSE_ON OR ( SELECT <> 2 AND QC_ACT ) OR SELECT = 3 ;
+          bPulse := ( SELECT = 0 OR SELECT = 2 ) AND PULSE_ON ;
+          IF PVPER_ON THEN
+              IF PER_MODE = 1 THEN
+                  rPVin := DINT_TO_REAL( INT_TO_DINT(PV_PER ) ) * 0.01 ;
+              ELSIF PER_MODE = 2 THEN               
+                  rPVin := DINT_TO_REAL( INT_TO_DINT(PV_PER ) ) * 3.616898e-003 ;
+              ELSE
+                  rPVin := DINT_TO_REAL( INT_TO_DINT(PV_PER ) ) * 0.1 ;
+              END_IF;
+              rPVin := rPVin * PV_FAC + PV_OFFS ;
+          ELSE
+              rPVin := PV_IN ;
+          END_IF;
+          IF bPulse THEN
+              srPulsPv := rPVin - sPvOld + srPulsPv ;
+              siPulsFil := siPulsFil + 1 ;
+          END_IF;
+          IF bLMNnew THEN
+              IF siPulsFil > 0 THEN
+                  PV := srPulsPv / DINT_TO_REAL( INT_TO_DINT( siPulsFil ) ) + sPvOld ;
+              ELSE
+                  PV := rPVin ;
+              END_IF;
+              siPulsFil := 0 ;
+              srPulsPv := 0.0 ;
+              IF LOAD_PID AND MAN_ON THEN
+                  IF PID_ON THEN
+                      IF PID_CON.GAIN <> 0.0 THEN
+                          GAIN := PID_CON.GAIN ;
+                          TI := PID_CON.TI ;
+                          TD := PID_CON.TD ;
+                          CON_ZONE := 250.0 / GAIN ;
+                      ELSE
+                          PID_ON := FALSE ;
+                      END_IF;
+                  END_IF;
+                  IF NOT PID_ON AND PI_CON.GAIN <> 0.0 THEN
+                      GAIN := PI_CON.GAIN ;
+                      TI := PI_CON.TI ;
+                      TD := 0.0 ;
+                      CONZ_ON := FALSE ;
+                      CON_ZONE := 250.0 / GAIN ;
+                  END_IF;
+                  IF CON_ZONE < 0.0 THEN
+                      CON_ZONE := -CON_ZONE ;
+                  END_IF;
+              END_IF;
+              LOAD_PID := FALSE ;
+              IF UNDO_PAR AND MAN_ON AND PAR_SAVE.GAIN <> 0.0 THEN
+                  PFAC_SP := PAR_SAVE.PFAC_SP ;
+                  GAIN := PAR_SAVE.GAIN ;
+                  TI := PAR_SAVE.TI ;
+                  TD := PAR_SAVE.TD ;
+                  D_F := PAR_SAVE.D_F ;
+                  CONZ_ON := PAR_SAVE.CONZ_ON ;
+                  CON_ZONE := PAR_SAVE.CON_ZONE ;
+              END_IF;
+              UNDO_PAR := FALSE ;
+              IF SAVE_PAR THEN
+                  PAR_SAVE.PFAC_SP := PFAC_SP ;
+                  PAR_SAVE.GAIN := GAIN ;
+                  PAR_SAVE.TI := TI ;
+                  PAR_SAVE.TD := TD ;
+                  PAR_SAVE.D_F := D_F ;
+                  PAR_SAVE.CONZ_ON := CONZ_ON ;
+                  PAR_SAVE.CON_ZONE := CON_ZONE ;
+                  SAVE_PAR := FALSE ;
+              END_IF;
+              iFilCyc := FIL_CYC ;
+              IF PHASE <> 2 THEN
+                  iFilCyc := 1 ;
+              END_IF;
+              rCycle := DINT_TO_REAL( INT_TO_DINT(iFilCyc ) ) * CYCLE ;
+              IF PHASE < 2 THEN
+                  IF bPulse THEN
+                      rPvFil := PV ;
+                  ELSE
+                      rPvFil := ( PV - sPvOld ) * 0.1 + sPvOld ;
+                  END_IF;
+                  sPvOld := rPvFil ;
+                  sctFil := 0 ;
+              ELSE
+                  IF sctFil < iFilCyc THEN
+                      srPv := PV - sPvOld + srPv ;
+                      sctFil := sctFil + 1 ;
+                  END_IF;
+                  IF sctFil >= iFilCyc THEN
+                      rPvdt := srPv / DINT_TO_REAL( INT_TO_DINT(sctFil ) ) ;
+                      rPvFil := rPvdt + sPvOld ;
+                      rPvdt := rPvdt / rCycle ;
+                      sctFil := 0 ;
+                      srPv := 0.0 ;
+                      rPvdtOri := rPvdt ;
+                      gf := DINT_TO_REAL( INT_TO_DINT(siSpDir ) ) * PVDT ;
+                      rVal := rPvdt - gf ;
+                      IF rVal < 0.0 THEN
+                          rVal := -rVal ;
+                      END_IF;
+                      srDPvdt := ( rVal - srDPvdt) * 0.1 + srDPvdt ;
+                      IF rPvdt > ( srDPvdt + gf )THEN
+                          rPvdt := srDPvdt + gf ;
+                      ELSIF rPvdt > ( gf - srDPvdt ) THEN
+                          rPvdt := gf - srDPvdt ;
+                      END_IF;
+                      PVDT := rPvdt ;
+                  END_IF;
+              END_IF;
+              IF NOT TUN_ON THEN
+                  TUN_ST := FALSE ;
+                  sbSpChange := FALSE ;
+                  sbOptLmn := FALSE ;
+                  srOptLmn := 0.0 ;
+                  srEffDlmn := 0.0 ;
+                  PHASE := 0 ;
+                  QTUN_RUN := FALSE ;
+              END_IF;
+              IF sctFil = 0 AND TUN_ON THEN
+                  rPVsigned := rPvFil ;
+                  rSpDelt := SP_INT - sSpOld ;
+                  IF PHASE > 1 THEN
+                      IF PHASE < 3 AND NOT sbSpChange AND ( rPvFil - PV0 ) * DINT_TO_REAL( INT_TO_DINT(siSpDir ) ) < 0.0 THEN
+                          siStatus := 999 ;
+                          siSpDir := - siSpDir;
+                          srNoise := 0.0 ;
+                          srNoise2 := 0.0 ;
+                          PVDT0 := - PVDT0 ;
+                          srPvdt2 := - srPvdt2 ;
+                          PVDT_MAX := PVDT0 ;
+                          srPvdtMax2 := PVDT0 ;
+                      END_IF;
+                      IF sbSpChange THEN
+                          rSeek := ( SP_INT - PV0 ) * 0.75 ;
+                      ELSE
+                          rSeek := 0.0 ;
+                      END_IF;
+                      IF siSpDir < 0 THEN
+                          rSeek := - rSeek ;
+                          rPvFil := - rPvFil ;
+                          rPvdtOri := - rPvdtOri ;
+                          PVDT := - PVDT ;
+                          rPV0 := - PV0 ;
+                      ELSE
+                          rPV0 := PV0 ;
+                      END_IF;
+                  END_IF;
+                  IF PHASE = 0 THEN
+                      tTime := TIME_TCK() ;
+                      siTime := TIME_TO_DINT(tTime ) ;
+                      siCycle := 0 ;
+                      siCycleP := 0 ;
+                      FIL_CYC := 1 ;
+                      LMN0 := sLmn ;
+                      srPvMin := PV ;
+                      PV0 := rPvFil ;
+                      NOISE_PV := 0.0 ;
+                      siStatus := 1 ;
+                      siSpDir := 1 ;
+                      TUN_ST := FALSE ;
+                      SP_INT := sSpOld ;
+                      STATUS_H := 0 ;
+                      PHASE := 1 ;
+                  ELSIF PHASE = 1 THEN
+                      siCycle := siCycle + 1 ;
+                      IF siStatus < 2000 THEN
+                          siStatus := siStatus + 1 ;
+                      END_IF;
+                      LMN0 := ( sLmn - LMN0 ) / DINT_TO_REAL( INT_TO_DINT( siStatus ) ) + LMN0 ;
+                      rVal := PV - srPvMin ;
+                      IF rVal < 0.0 THEN
+                          NOISE_PV := NOISE_PV - rVal;
+                          srPvMin := PV ;
+                      ELSIF NOISE_PV < rVal THEN
+                          NOISE_PV := rVal ;
+                      END_IF;
+                      IF rSpDelt <> 0.0 OR TUN_ST THEN
+                          IF rSpDelt <> 0.0 THEN
+                              sbSpChange := TRUE ;
+                          END_IF;
+                          IF SP_INT < PV AND sbSpChange THEN
+                              siSpDir := -1 ;
+                          END_IF;
+                          srEffDlmn := TUN_DLMN ;
+                          gf := srEffDlmn + LMN0;
+                          IF gf > LMN_HLM THEN
+                              srEffDlmn := LMN_HLM - LMN0 ;
+                          ELSIF gf < LMN_LLM THEN
+                              srEffDlmn := LMN_LLM - LMN0 ;
+                          END_IF;
+                          IF srEffDlmn < 5.0 AND srEffDlmn > -5.0 THEN
+                              STATUS_H := 30002 ;
+                              SP_INT := sSpOld ;
+                              TUN_ON := False ;
+                              PHASE := 0 ;
+                          ELSE
+                              tTime := TIME_TCK();
+                              iTime := TIME_TO_DINT(tTime );
+                              IF iTime > siTime THEN
+                                  iTime := iTime - siTime ;
+                              ELSE
+                                  iTime := iTime + 1 ;
+                                  iTime := iTime - siTime + 2147483647 ;
+                              END_IF;
+                              sCycleM := DINT_TO_REAL(iTime ) ;
+                              srTime := sCycleM * 0.001 ;
+                              sCycleM := srTime / DINT_TO_REAL( siCycle ) ;
+                              srTime := ( CYCLE - sCycleM ) / CYCLE ;
+                              IF srTime > 0.05 OR srTime < -0.05 THEN
+                                  STATUS_H := 30005 ;
+                                  SP_INT := sSpOld ;
+                                  TUN_ON := FALSE ;
+                                  PHASE := 0 ;
+                              ELSE
+                                  srPv := 0.0 ;
+                                  srNoise := 0.0 ;
+                                  POI_CMAX := 20 ;
+                                  POI_CYCL := 0 ;
+                                  PVDT0 := ( ( rPvFil - PV0) * DINT_TO_REAL( INT_TO_DINT( siSpDir ) ) ) / ( DINT_TO_REAL(siCycle ) * CYCLE ) ;
+                                  PV0 := rPvFil ;
+                                  P_INF := 0.0 ;
+                                  rPVsigned := PV ;
+                                  srTime := 0.0 ;
+                                  PVDT_MAX := PVDT0 ;
+                                  NOI_PVDT := 0.0 ;
+                                  srDPvdt := 0.0 ;
+                                  srDPvdt2 := 0.0 ;
+                                  srPvdt2 := 0.0 ;
+                                  srPvdtMax2 := PVDT0 ;
+                                  srNoise2 := 0.0 ;
+                                  srPvOld2 := rPvFil ;
+                                  siTime := 0 ;
+                                  sbOptLmn := TRUE ;
+                                  srOptLmn := LMN0 ;
+                                  siStatus := 0 ;
+                                  siCycle := 0 ;
+                                  PHASE := 2 ;
+                                  QTUN_RUN := TRUE ;
+                                  sbReOpt := FALSE ;
+                              END_IF;
+                          END_IF;
+                      END_IF;
+  ELSE
+                      IF PHASE = 2 THEN
+                          rPvDelt := rPvFil - rPV0 ;
+                          srTime := srTime + rCycle;
+                          siCycle := siCycle + 1 ;
+                          IF PVDT < PVDT_MAX OR PVDT = 0.0 THEN
+                              POI_CYCL := POI_CYCL + 1 ;
+                              IF rPvdtOri >= PVDT_MAX THEN
+                                  POI_CYCL := 0 ;
+                              END_IF;
+                          ELSE
+                              PVDT_MAX := PVDT ;
+                              IF POI_CYCL > 0 THEN
+                                  iVal := POI_CYCL * 2 ;
+                                  IF POI_CMAX <= iVal THEN
+                                      POI_CMAX := iVal ;
+                                  END_IF;
+                                  POI_CYCL := 0 ;
+                              END_IF;
+                          END_IF;
+                          siTime := siTime + 1 ;
+                          IF siTime = 2 THEN
+                              rPvNew2 := ( sPvOld + rPVsigned ) * 0.5 ;
+                              rPvdt2 := ( rPvNew2 - srPvOld2 ) / ( 2.0 * rCycle ) * DINT_TO_REAL( INT_TO_DINT(siSpDir ) ) ;
+                              rVal := rPvdt2 - srPvdt2;
+                              IF rVal < 0.0 THEN
+                                  rVal := -rVal ;
+                              END_IF;
+                              srDPvdt2 := ( rVal - srDPvdt2 ) * 0.1 + srDPvdt2 ;
+                              IF rPvdt2 > srDPvdt2 + srPvdt2 THEN
+                                  rPvdt2 := srDPvdt2 + srPvdt2 ;
+                              ELSIF rPvdt2 < srDPvdt2 - srPvdt2 THEN
+                                  rPvdt2 := srDPvdt2 - srPvdt2 ;
+                              END_IF;
+                              rPvdt3 := ( rPvdt2 + srPvdt2 ) * 0.5 ;
+                              srPvdt2 := rPvdt2 ;
+                              IF srPvdtMax2 < srPvdt2 THEN
+                                  srPvdtMax2 := srPvdt2 ;
+                              END_IF;
+                              gf := srPvdtMax2 - srPvdt2 ;
+                              IF srNoise2 < gf THEN
+                                  srNoise2 := gf ;
+                              END_IF;
+                          END_IF;
+                          IF PVDT_MAX <> 0.0 THEN
+                              rNoiPvdt := 100.0 * srNoise / PVDT_MAX ;
+                          ELSE
+                              rNoiPvdt := 100.0 ;
+                          END_IF;
+                          rPvdtMax0 := PVDT_MAX - PVDT0;
+                          IF ((rPvDelt<0.8*rSeek OR NOT sbSpChange) AND QTUN_RUN AND FIL_CYC < 1024 AND siTime=2) AND
+                             (((siCycle>6 AND PVDT=0.0 OR siStatus=999) OR ((rNoiPvdt>60.0 AND siCycle>7) AND
+                             (POI_CYCL<2 OR srPvdt2>0.99*srPvdtMax2))) OR (rNoiPvdt>5.0 AND siCycle>15 AND  POI_CYCL<2))
+                          THEN
+                              FIL_CYC := FIL_CYC * 2 ;
+                              rPVsigned := ( sPvOld + rPVsigned ) * 0.5 ;
+                              srDPvdt := srDPvdt2 ;
+                              srNoise := srNoise2 ;
+                              PVDT_MAX := srPvdtMax2 ;
+                              PVDT := srPvdtMax2 ;
+                              POI_CYCL := 0 ;
+                              srPvOld2 := ( srPvOld2 + rPvNew2 ) * 0.5 ;
+                              srPvdtMax2 := PVDT0 ;
+                              srDPvdt2 := srNoise2 * 0.5 ;
+                              srNoise2 := 0.0 ;
+                              srPvdt2 := rPvdt3 ;
+                              siTime := 0 ;
+                              siCycle := 0 ;
+                              siStatus := 0 ;
+                          END_IF;
+                          IF siTime = 2 THEN
+                              srPvOld2 := rPvNew2 ;
+                              siTime := 0 ;
+                          END_IF;
+                          IF rPvDelt > rSeek * 0.3 THEN
+                              IF POI_CYCL>=POI_CMAX AND (rPvDelt - DINT_TO_REAL(INT_TO_DINT(siSpDir))*P_INF)>2.0 * NOISE_PV AND
+                                 rPvDelt>1.2*P_INF*DINT_TO_REAL(INT_TO_DINT(siSpDir))
+                              THEN
+                                  QTUN_RUN := FALSE ;
+                                  IF NOT TUN_KEEP THEN
+                                      PHASE := 3 ;
+                                  END_IF;
+                              ELSIF rPvDelt > rSeek AND sbSpChange THEN
+                                  IF POI_CYCL = 0 THEN
+                                      POI_CYCL := 1 ;
+                                  END_IF;
+                                  STATUS_H := STATUS_H + 20 ;
+                                  QTUN_RUN := False ;
+                                  PHASE := 3 ;
+                              END_IF;
+                          END_IF;
+                          IF POI_CYCL = 1 THEN
+                              IF rPvdtMax0 > 1.000000e-009 THEN
+                                  rVal := srNoise ;
+                                  gf := rPvdtMax0 * 1.99 ;
+                                  IF rVal > gf THEN
+                                      rVal := gf ;
+                                  END_IF;
+                                  NOI_PVDT := 100.0 * rVal / rPvdtMax0;
+                                  rPvdtMax0 := rPvdtMax0 - rVal * 0.45 ;
+                                  TU := ( ( PVDT_MAX - rVal * 0.45 ) * srTime - rPvDelt ) / rPvdtMax0 - ( rCycle - CYCLE ) * 0.5 ;
+                                  KIG := rPvdtMax0 / srEffDlmn * DINT_TO_REAL( INT_TO_DINT( siSpDir ) ) * 100.0 ;
+                                  P_INF := DINT_TO_REAL( INT_TO_DINT( siSpDir ) ) * rPvDelt ;
+                                  T_P_INF := srTime - 2.0 * rCycle ;
+                                  rT1sim := 1.129 * TU ;
+                                  rT2sim := 105.72 * TU ;
+                                  rKsim := 1.1103 * TU * KIG ;
+                                  sGf11_15 := rT1sim / (rT1sim + CYCLE ) ;
+                                  sGf12_15 := CYCLE / ( rT1sim + CYCLE ) * rKsim * DINT_TO_REAL( INT_TO_DINT( siSpDir ) ) ;
+                                  sGf21_15 := rT2sim / (rT2sim + CYCLE ) ;
+                                  sGf22_15 := CYCLE / ( rT2sim + CYCLE ) ;
+                                  sPv0Sim_15 := 1.29 * PVDT0 * rT2sim + PV0 ;
+                                  srPVsim2_15 := rPvFil - sPv0Sim_15 ;
+                                  srPVsim1_15 := rT2sim * PVDT + srPVsim2_15 ;
+                                  rT1sim := 3.57 * TU ;
+                                  rT2sim := 3.57 * TU ;
+                                  rKsim := 0.097 * KIG * TU ;
+                                  sGf11_20 := rT1sim / (rT1sim + CYCLE ) ;
+                                  sGf12_20 := CYCLE / ( rT1sim + CYCLE ) * rKsim * DINT_TO_REAL( INT_TO_DINT( siSpDir ) ) ;
+                                  sGf21_20 := rT2sim / (rT2sim + CYCLE ) ;
+                                  sGf22_20 := CYCLE / ( rT2sim + CYCLE ) ;
+                                  sPv0Sim_20 := 1.6 * PVDT0 * rT2sim + PV0 ;
+                                  srPVsim2_20 := rPvFil - sPv0Sim_20 ;
+                                  srPVsim1_20 := rT2sim * PVDT + srPVsim2_20 ;
+                                  rT1sim := 1.247 * TU ;
+                                  rT2sim := 1.247 * TU ;
+                                  rKsim := 0.046 * KIG * TU ;
+                                  sGf11_30 := rT1sim / (rT1sim + CYCLE ) ;
+                                  sGf12_30 := CYCLE / ( rT1sim + CYCLE ) * rKsim * DINT_TO_REAL( INT_TO_DINT( siSpDir ) );
+                                  sGf21_30 := rT2sim / (rT2sim + CYCLE ) ;
+                                  sGf22_30 := CYCLE / ( rT2sim + CYCLE ) ;
+                                  sPv0Sim_30 := 3.0 * PVDT0 * rT2sim + PV0 ;
+                                  srPVsim3_30 := rPvFil - sPv0Sim_30 ;
+                                  srPVsim2_30 := rT2sim * PVDT + srPVsim3_30 ;
+                                  srPVsim1_30 := rT2sim * PVDT + srPVsim2_30 ;
+                              END_IF;
+                          END_IF;
+                          IF POI_CYCL > 0 THEN
+                              gf := PVDT_MAX - PVDT;
+                              IF srNoise < gf THEN
+                                  srNoise := gf ;
+                              END_IF;
+                          END_IF;
+                      ELSE
+                          IF PHASE = 3 THEN
+                              srTime := T_P_INF ;
+                              IF TU < 3.0 * CYCLE THEN
+                                  tw_durch_tu := srTime / TU ;
+                                  TU := 3.0 * CYCLE ;
+                                  srTime := TU * tw_durch_tu;
+                                  STATUS_H := STATUS_H + 100 ;
+                              ELSIF TU > 0.7 * srTime THEN;
+                                  TU := 0.7 * srTime ;
+                                  STATUS_H := STATUS_H + 300 ;
+                              END_IF;
+                              tw_durch_tu := srTime / TU ;
+                              TA := tw_durch_tu * 0.76 * tw_durch_tu - 0.044 ;
+                              IF tw_durch_tu < 2.469 THEN
+                                  TA := ( tw_durch_tu - 2.469 ) * 0.48 + TA ;
+                              END_IF;
+                              gf := TA - 0.3954 ;
+                              N_PTN := ( gf * 1.1 + 7.9826 ) / gf ;
+                              TA := TA * TU ;
+                              IF N_PTN < 1.01 THEN
+                                  N_PTN := 1.01 ;
+                                  STATUS_H := STATUS_H + 1000 ;
+                              ELSIF N_PTN > 10 THEN
+                                  N_PTN := 10 ;
+                                  STATUS_H := STATUS_H + 2000 ;
+                              END_IF;
+                              srNoise := NOI_PVDT * 0.01 * ( PVDT_MAX - PVDT0 ) ;
+                              GAIN_P := 0.01 * KIG * TA ;
+                              IF STATUS_H < 10 THEN
+                                  STATUS_H := 10000 ;
+                              ELSE
+                                  STATUS_H := STATUS_H + 20000 ;
+                              END_IF;
+                              STATUS_D := 0 ;
+                              PAR_SAVE.PFAC_SP := PFAC_SP;
+                              PAR_SAVE.GAIN := GAIN ;
+                              PAR_SAVE.TI := TI ;
+                              PAR_SAVE.TD := TD ;
+                              PAR_SAVE.D_F := D_F ;
+                              PAR_SAVE.CONZ_ON := CONZ_ON;
+                              PAR_SAVE.CON_ZONE := CON_ZONE ;
+                              PHASE := 4 ;
+                          ELSE ;
+                          IF PHASE = 4 THEN
+                              TM_LAG_P := ( srTime + CYCLE) / ( N_PTN - 1.0 ) ;
+                              IF N_PTN >= 2.1 THEN
+                                  PI_CON.GAIN := ( N_PTN + 2.0 ) / ( N_PTN - 1.0 ) / 4.0 / GAIN_P ;
+                                  PI_CON.TI := ( 2.0 + N_PTN ) * TM_LAG_P / 3.0 ;
+                                  koeff := 7.0 * N_PTN + 16.0 ;
+                                  IF N_PTN <= 2.6 THEN
+                                      PID_CON.GAIN := 3.5625 / GAIN_P ;
+                                      STATUS_D := 310 ;
+                                  ELSE
+                                      PID_CON.GAIN := koeff / ( N_PTN - 2.0 ) / 16.0 / GAIN_P;
+                                      STATUS_D := 320;
+                                  END_IF;
+                                  PID_CON.TI := koeff * TM_LAG_P / 15.0 ;
+                                  PID_CON.TD := ( 1.0 + N_PTN ) * ( 3.0 + N_PTN ) * TM_LAG_P / koeff ;
+                                  CONZ_ON := FALSE ;
+                              ELSE
+                                  STATUS_D := 110 ;
+                                  CONZ_ON := TRUE ;
+                                  PI_CON.TI := 6.0 * TU ;
+                                  PI_CON.GAIN := 44.0 / TU / KIG ;
+                                  PID_CON.TI := 2.0 * TU ;
+                                  PID_CON.GAIN := 2.727272 * PI_CON.GAIN ;
+                                  gf := 2.0 ;
+                                  IF N_PTN > 1.5 THEN
+                                      gf := gf - ( N_PTN - 1.5 ) * 2.5 ;
+                                      STATUS_D := 121 ;
+                                  END_IF;
+                                  IF N_PTN > 1.9 THEN
+                                      PI_CON.GAIN := PI_CON.GAIN * gf ;
+                                      PID_CON.TI := ( ( 1.0 - gf ) * 4.0 + 1.0 ) * PID_CON.TI ;
+                                      STATUS_D := 200 ;
+                                  END_IF;
+                                  PID_CON.GAIN := PID_CON.GAIN * gf ;
+                                  PID_CON.TD := PID_CON.TI / 4.0 ;
+                              END_IF;
+                              PFAC_SP := 0.8 ;
+                              D_F := 5.0 ;
+                              IF PID_ON THEN
+                                  GAIN := PID_CON.GAIN ;
+                                  TI := PID_CON.TI ;
+                                  TD := PID_CON.TD ;
+                              ELSE
+                                  GAIN := PI_CON.GAIN ;
+                                  TI := PI_CON.TI ;
+                                  TD := 0.0 ;
+                                  CONZ_ON := FALSE ;
+                              END_IF;
+                              CON_ZONE := 250.0 / GAIN ;
+                              IF CON_ZONE < 0.0 THEN
+                                  CON_ZONE := - CON_ZONE ;
+                              END_IF;
+                              IF NOT TUN_KEEP THEN
+                                  srOptLmn := 0.75 * srEffDlmn + LMN0;
+                                  srEffDlmn := 0.0 ;
+                                  PHASE := 5 ;
+                              ELSE
+                                  STATUS_D := 0 ;
+                              END_IF;
+                              ELSIF PHASE =5 THEN ;
+                                  sbOptLmn := False ;
+                                  MAN_ON := FALSE ;
+                                  IF sbReOpt THEN
+                                      PHASE := 0 ;
+                                      TUN_ON := FALSE ;
+                                      IF N_PTN <= 1.9 THEN
+                                          gf := ( 2.1 - N_PTN ) * 5.0 ;
+                                          TA := gf * TA ;
+                                          GAIN_P := GAIN_P * gf ;
+                                      END_IF;
+                                      STATUS_D := STATUS_D + 1 ;
+                                  ELSE
+                                      srTime := 0.0 ;
+                                      PHASE := 7 ;
+                                     srDelPvsim_30 := 0.0 ;
+                                     srDelPvsim_20 := 0.0 ;
+                                     srDelPvsim_15 := 0.0 ;
+                                  END_IF;
+                              ELSIF PHASE = 7 THEN
+                                  srTime := srTime + rCycle;
+                                  IF srTime >= 0.3 * TA THEN
+                                     srDelPvsim_15 := ( srPVsim2_15 + sPv0Sim_15 ) - PV + srDelPvsim_15 ;
+                                     srDelPvsim_20 := ( srPVsim2_20 + sPv0Sim_20 ) - PV + srDelPvsim_20 ;
+                                     srDelPvsim_30 := ( srPVsim2_30 + sPv0Sim_30 ) - PV + srDelPvsim_30 ;
+                                      IF srTime >= 0.35 * TA THEN
+                                          sNpInf := N_PTN ;
+                                          IF srDelPvsim_15 < 0.0 THEN
+                                              IF N_PTN < 1.5 THEN
+                                                 sbReOpt := FALSE ;
+                                              ELSE
+                                                 N_PTN := 1.5 ;
+                                                 sbReOpt := TRUE ;
+                                              END_IF;
+                                          ELSIF srDelPvsim_30 > 0.0 THEN;
+                                              IF N_PTN > 3.0 THEN
+                                                 sbReOpt :=FALSE ;
+                                              ELSE
+                                                 N_PTN := 3.0 ;
+                                                 sbReOpt := TRUE ;
+                                              END_IF;
+                                          ELSE
+                                              IF srDelPvsim_15 > 0.0 AND srDelPvsim_20 < 0.0 THEN
+                                                 rSumHp := - srDelPvsim_20 ;
+                                                 rSumLp := srDelPvsim_15 ;
+                                                 rHp := 2.0 ;
+                                                 rLp := 1.5 ;
+                                              ELSIF srDelPvsim_20 > 0.0 AND srDelPvsim_30 < 0.0 THEN ;
+                                                 rSumHp := - srDelPvsim_30 ;
+                                                 rSumLp := srDelPvsim_20 ;
+                                                 rHp := 3.0 ;
+                                                 rLp := 2.0 ;
+                                              END_IF;
+                                             rNptn := ( rSumHp * rLp + rsumLp * rHp ) / ( rSumHp + rSumLp ) ;
+                                             rNptnHl := rNptn + 0.1 ;
+                                             rNptnLl := rNptn - 0.1 ;
+                                              IF N_PTN > rNptnHl THEN
+                                                 N_PTN := rNptnHl ;
+                                                 sbReOpt := TRUE ;
+                                              ELSIF N_PTN < rNptnLl THEN;
+                                                 N_PTN := rNptnLl ;
+                                                 sbReOpt := TRUE ;
+                                              ELSE
+                                                 sbReOpt := FALSE ;
+                                              END_IF;
+                                          END_IF;
+                                          IF sbReOpt THEN
+                                             srOptLmn := sLmn ;
+                                             sbOptLmn := TRUE ;
+                                             PHASE := 4 ;
+                                          ELSE
+                                             TUN_ON := FALSE ;
+                                             PHASE := 0 ;
+                                              IF N_PTN <= 1.9 THEN
+                                                 gf := ( 2.1 - N_PTN ) * 5.0 ;
+                                                 TA := gf * TA;
+                                                 GAIN_P := GAIN_P * gf ;
+                                              END_IF;
+                                          END_IF;
+                                      END_IF;
+                                  END_IF;
+                              END_IF;
+                          END_IF;
+                      END_IF;
+                  END_IF;
+                  sPvOld := rPVsigned ;
+              END_IF;
+              IF PHASE <= 7 AND PHASE >= 2 THEN
+                  srPVsim1_30 := sGf11_30 * srPVsim1_30 + ( sLmn - LMN0 ) * sGf12_30 ;
+                  srPVsim2_30 := sGf21_30 * srPVsim2_30 + sGf22_30 * srPVsim1_30 ;
+                  srPVsim3_30 := sGf21_30 * srPVsim3_30 + sGf22_30 * srPVsim2_30 ;
+                  srPVsim1_20 := sGf11_20 * srPVsim1_20 + ( sLmn - LMN0 ) * sGf12_20 ;
+                  srPVsim2_20 := sGf21_20 * srPVsim2_20 + sGf22_20 * srPVsim1_20 ;
+                  srPVsim1_15 := sGf11_15 * srPVsim1_15 + ( sLmn - LMN0 ) * sGf12_15 ;
+                  srPVsim2_15 := sGf21_15 * srPVsim2_15 + sGf22_15 * srPVsim1_15 ;
+              END_IF;
+              rDiff := SP_INT - PV ;
+              rSpDelt := SP_INT - sSpOld ;
+              IF rDiff < - DEADB_W THEN
+                  rDiff := rDiff + DEADB_W ;
+              ELSIF rDiff > DEADB_W THEN
+                  rDiff := rDiff - DEADB_W ;
+              ELSE
+                  rDiff := 0.0 ;
+              END_IF;
+              ER := rDiff ;
+              rTmLag := Td / D_F ;
+              LMN_P := GAIN * ER ;
+              IF TI <> 0.0 AND NOT I_ITL_ON THEN
+                  IF NOT MAN_ON AND NOT sbOptLmn AND NOT sbConzOn THEN
+                      rDiff := CYCLE / TI * ( LMN_P + sInvAlt) * 0.5 + sRestInt ;
+                      IF ( rDiff > 0.0 AND ( INT_HPOS OR QLMN_HLM ) ) OR ( rDiff < 0.0 AND ( INT_HNEG OR QLMN_LLM ) )THEN
+                          rDiff := 0.0;
+                      END_IF;
+                      LMN_I := sIanteilAlt + rDiff ;
+                      sRestInt := sIanteilAlt - LMN_I + rDiff ;
+                  END_IF;
+              ELSE
+                  sRestInt := 0.0 ;
+                  IF I_ITL_ON THEN
+                      LMN_I := I_ITLVAL ;
+                  ELSE
+                      LMN_I := 0.0 ;
+                  END_IF;
+              END_IF;
+              IF TD <> 0.0 AND NOT MAN_ON AND NOT sbOptLmn AND  NOT sbConzOn THEN
+                  Verstaerk := TD / ( CYCLE * 0.5 + rTmLag ) ;
+                  LMN_D := ( LMN_P - sRueck ) * Verstaerk ;
+                  RueckAlt := sRueck ;
+                  RueckDiff := CYCLE / TD * LMN_D + sRestDif ;
+                  sRueck := RueckDiff + RueckAlt ;
+                  sRestDif := RueckAlt - sRueck + RueckDiff ;
+              ELSE
+                  LMN_D := 0.0 ;
+                  sRestDif := 0.0 ;
+                  sRueck := LMN_P ;
+              END_IF;
+              bConzOn := FALSE ;
+              rDeltaI := 0.0 ;
+              IF sbOptLmn THEN
+                  dLmn := srOptLmn + srEffDlmn ;
+              ELSIF MAN_ON THEN
+                  dLmn := MAN ;
+              ELSE
+                  dLmn := LMN_P + LMN_I + DISV ;
+                  IF NOT MAN_ON THEN
+                      IF dLmn > LMN_HLM THEN
+                          MAN := LMN_HLM ;
+                      ELSIF dLmn < LMN_LLM THEN
+                          MAN := LMN_LLM ;
+                      ELSE
+                           MAN := dLmn ;
+                      END_IF;
+                  END_IF;
+                  dLmn := LMN_P + LMN_I + DISV + LMN_D ;
+                  IF TI <> 0.0 AND NOT I_ITL_ON THEN
+                      IF PFAC_SP > 1.0 THEN
+                          PFAC_SP := 1.0 ;
+                      ELSIF PFAC_SP < 0.0 THEN;
+                          PFAC_SP := 0.0 ;
+                      END_IF;
+                      IF PFAC_SP > 0.5 THEN
+                          gf := 1.0 - PFAC_SP ;
+                      ELSE
+                          gf := PFAC_SP ;
+                      END_IF;
+                      rDeltaI := GAIN * rSpDelt * ( PFAC_SP - 1.0 -gf ) ;
+                      srDiffSp := GAIN * rSpDelt * gf + srDiffSp ;
+                      srDiffSp := srDiffSp * gf * TI / ( gf * TI + CYCLE ) ;
+                      dLmn := dLmn + rDeltaI + srDiffSp ;
+                      IF CONZ_ON THEN
+                          gf := CON_ZONE * 0.8 ;
+                          rDiff_int := ER ;
+                          IF GAIN < 0.0 THEN
+                              rDiff_int := - rDiff_int ;
+                          END_IF;
+                          IF rDiff_int >= CON_ZONE OR ( rDiff_int >= gf AND sbConzOn ) THEN
+                              dLmn := LMN_HLM ;
+                              bConzOn := TRUE ;
+                          ELSIF rDiff_int <= - CON_ZONE OR ( rDiff_int <= - gf AND sbConzOn ) THEN
+                              dLmn := LMN_LLM ;
+                              bConzOn := TRUE ;
+                          END_IF;
+                      END_IF;
+                      IF NOT bConzOn THEN
+                          IF LMN_HLM < sLmnHlmOld AND dLmn > LMN_HLM THEN
+                              rVal := dLmn ;
+                              IF rVal > sLmnHlmOld THEN
+                                  rVal := sLmnHlmOld ;
+                              END_IF;
+                              rDeltaI := rDeltaI - rVal + LMN_HLM ;
+                          ELSE
+                              IF LMN_LLM > sLmnLlmOld AND dLmn < LMN_LLM THEN
+                                  rVal := dLmn ;
+                                  IF rVal < sLmnLlmOld THEN
+                                      rVal := sLmnLlmOld ;
+                                  END_IF;
+                                  rDeltaI := rDeltaI - rVal + LMN_LLM ;
+                              END_IF;
+                          END_IF;
+                      END_IF;
+                  ELSE
+                      srDiffSp := 0.0 ;
+                  END_IF;
+              END_IF;
+              sLmnHlmOld := LMN_HLM ;
+              sLmnLlmOld := LMN_LLM ;
+              sbConzOn := bConzOn ;
+              sLmn := dLmn ;
+              IF sLmn > LMN_HLM THEN
+                  QLMN_HLM := TRUE ;
+                  QLMN_LLM := FALSE ;
+                  sLmn := LMN_HLM ;
+              ELSE
+                  QLMN_HLM := FALSE ;
+                  IF sLmn <= LMN_LLM THEN
+                      QLMN_LLM := TRUE ;
+                      sLmn := LMN_LLM ;
+                  ELSE
+                      QLMN_LLM := FALSE ;
+                  END_IF;
+              END_IF;
+              IF TI <> 0.0 THEN
+                  IF MAN_ON OR sbOptLmn OR sbConzOn THEN
+                      srDiffSp := 0.0 ;
+                      sRestInt := 0.0 ;
+                      LMN_I := sLmn - LMN_P - DISV ;
+                      IF sbConzOn THEN
+                          MAN := sLmn ;
+                      END_IF;
+                  ELSE
+                      LMN_I := LMN_I + rDeltaI;
+                      IF LMN_I > LMN_HLM - DISV AND dLmn > LMN_HLM AND dLmn- LMN_D > LMN_HLM THEN
+                          rVal := LMN_HLM - DISV ;
+                          gf := dLmn -LMN_HLM ;
+                          rVal := LMN_I - rVal ;
+                          IF rVal > gf THEN
+                              rVal := gf ;
+                          END_IF;
+                          LMN_I := LMN_I - rVal ;
+                      ELSIF LMN_I < LMN_LLM - DISV AND dLmn < LMN_LLM AND dLmn -LMN_D < LMN_LLM THEN ;
+                          rVal := LMN_LLM - DISV ;
+                          gf := dLmn -LMN_LLM ;
+                          rVal := LMN_I - rVal ;
+                          IF rVal < gf THEN
+                              rVal := gf ;
+                          END_IF;
+                          LMN_I := LMN_I - rVal ;
+                      END_IF;
+                  END_IF;
+              END_IF;
+              dLmn := sLmn ;
+              sInvAlt := LMN_P ;
+              sIanteilAlt := LMN_I ;
+              sSpOld := SP_INT ;
+              LMN := dLmn * LMN_FAC + LMN_OFFS ;
+              dLmn := LMN * 264.8 ;
+              IF dLmn >= 32511.0 THEN
+                  dLmn := 32511.0 ;
+              ELSIF dLmn <= -32512.0 THEN
+                  dLmn := -32512.0 ;
+              END_IF;
+              LMN_PER := DINT_TO_INT( REAL_TO_DINT ( dLmn ) ) ;
+              QC_ACT := NOT PULSE_ON ;
+              sPTm := sLmn * PER_TM * 0.01 ;
+              IF sLmn < 0.0 THEN
+                  sPTm := 0.0 ;
+              END_IF;
+          END_IF;
+          IF bPulse THEN
+              rP_B_TM := P_B_TM ;
+              IF rP_B_TM < CYCLE_P THEN
+                  rP_B_TM := CYCLE_P ;
+              END_IF;
+              bIZv := FALSE ;
+              IF QPULSE THEN
+                  IF spassPTm < rP_B_TM OR sPTm >= spassPTm OR sPTm >= PER_TM - rP_B_TM THEN
+                      bIZv := TRUE ;
+                  END_IF;
+                  IF NOT bIZv THEN
+                      QPULSE := FALSE ;
+                  END_IF;
+              ELSIF spassPTm >= rP_B_TM AND spassPTm >= PER_TM - sPTm AND sPTm >= rP_B_TM THEN
+                      QPULSE := TRUE ;
+              ELSE
+                  bIZv := TRUE ;
+              END_IF ;
+              IF bIZv THEN
+                  IF spassPTm < PER_TM THEN
+                      spassPTm := spassPTm + CYCLE_P ;
+                  END_IF;
+              ELSE
+                  spassPTm := CYCLE_P * 1.5 ;
+              END_IF;
+              sCycTmPass := sCycTmPass + CYCLE_P ;
+              siCycleP := siCycleP + 1 ;
+              IF sCycTmPass >= CYCLE THEN
+                  QC_ACT := TRUE ;
+                  sCycTmPass := CYCLE_P * 0.5 ;
+              END_IF;
+          END_IF;
+      END_IF;
+  END_FUNCTION_BLOCK
