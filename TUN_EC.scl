@@ -1,0 +1,734 @@
+// Name: TUN_EC
+// Symbolic Name: TUN_EC
+// Symbol Comment: self-tuning or adaptation of a continuous PID controller
+// Family: TUNING
+// Version: 1.0
+// Author: AUT_1
+// Last modified: 08/06/1999
+// Use:
+// Size in work memory: 5956 bytes
+// Object name:
+// Signature: generiert vom SCL Ьbersetzer Version: SCL V5.01 (C5.0.16.5)
+
+{
+Scl_ResetOptions ;
+Scl_OverwriteBlocks:=           'y' ;
+Scl_GenerateReferenceData :=    'y' ;
+Scl_S7ServerActive:=            'y' ;
+Scl_CreateObjectCode:=          'y' ;
+Scl_OptimizeObjectCode:=        'y' ;
+Scl_MonitorArrayLimits:=        'n' ;
+Scl_CreateDebugInfo :=          'n' ;
+Scl_SetOKFlag:=                 'n' ;
+Scl_SetMaximumStringLength:=    '254'
+}
+FUNCTION_BLOCK FB150
+TITLE ='TUN_EC'
+AUTHOR : AUT_1
+FAMILY : TUNING
+NAME : TUN_EC
+VERSION : '1.0'
+ 
+ 
+VAR_INPUT
+  SP : REAL ;    //setpoint
+  PV : REAL ;    //process variable
+  LMN : REAL ;    //manipulated value
+  MAN : REAL ;    //manual value
+  MIN_STEP : REAL  := 1.000000e+001;    //minimal setpoint step
+  LHLM_TUN : REAL  := 8.000000e+001;    //manipulated value high limit on self tuning
+  LLLM_TUN : REAL  := -2.000000e+001;    //manipulated value low limit on self tuning
+  NORM_FAC : REAL  := 1.000000e+000;    //proportional gain normalizing factor
+  MAN_ON : BOOL  := TRUE;    //manual mode on
+  PID_ON : BOOL  := TRUE;    //PID mode on
+  STRUC_ON : BOOL ;    //variable structure control on
+  WRITE_DIS : BOOL ;    //writing to FM is not possible
+  PRED_ON : BOOL  := TRUE;    //manual->automatic transfer with prediction of manipulated value
+  CYCLE : TIME  := T#100MS;    //sample time
+END_VAR
+VAR_OUTPUT
+  MAN_OUT : REAL ;    //manual value output
+  SP_OUT : REAL ;    //setpoint output
+  GAIN : REAL  := 1.500000e+000;    //proportional gain
+  TI : TIME  := T#1H;    //reset time
+  TD : TIME ;    //derivative time
+  TM_LAG : TIME  := T#1S;    //time lag
+  RATIOFAC : REAL  := 1.000000e+000;    //ratio factor heating/cooling
+  PHASE : INT ;    //phase 0..7
+  STATUS_H : INT ;    //status heating
+  STATUS_D : INT ;    //status controller design
+  STATUS_C : INT ;    //status cooling
+  QMAN_ON : BOOL ;    //manual mode on
+  QI_SEL : BOOL  := TRUE;    //integral action on
+  QD_SEL : BOOL ;    //derivative action on
+  QWRITE : BOOL ;    //TUN_EC writes parameters to PID controller
+  PROCESS : STRUCT    
+   GAIN : REAL  := 9.990000e+002;    //process gain
+   TM_LAG1 : REAL ;    //process slow time constant
+   TM_LAG2 : REAL ;    //process fast time constant
+   PV00 : REAL ;    //process steady state value for zero input
+   KIG : REAL ;    //maximal ascent ratio of PV
+   KIG_C : REAL ;    //maximal descent ratio of PV (cooling)
+  END_STRUCT ;   
+  PI_CON : STRUCT    
+   GAIN : REAL  := 1.500000e+000;    //PI proportional gain, normalized
+   TI : REAL  := 3.600000e+003;    //PI reset time
+  END_STRUCT ;   
+  PID_CON : STRUCT    
+   GAIN : REAL  := 1.500000e+000;    //PID proportional gain
+   TI : REAL  := 3.600000e+003;    //PID reset time
+   TD : REAL ;    //PID derivative time
+  END_STRUCT ;   
+  PI_CON_OLD : STRUCT    
+   GAIN : REAL  := 1.500000e+000;    //PI old proportional gain
+   TI : REAL  := 3.600000e+003;    //PI old reset time
+  END_STRUCT ;   
+  PID_CON_OLD : STRUCT    
+   GAIN : REAL ;    //PID old proportional gain
+   TI : REAL ;    //PID old reset time
+   TD : REAL ;    //PID old derivative time
+  END_STRUCT ;   
+  TU : REAL ;    //time lag                           
+  TA : REAL ;    //recovery time                      
+END_VAR
+VAR_IN_OUT
+  ADAPT1ST : BOOL ;    //complete restart
+  ADAPT_ON : BOOL ;    //online adaption with next setpoint step on
+  STEADY : BOOL ;    //steady state reached
+  COOLID_ON : BOOL ;    //cooling identification on
+  UNDO_PAR : BOOL ;    //undo change of controller parameters
+  SAVE_PAR : BOOL ;    //save current controller parameters
+  LOAD_PAR : BOOL ;    //load current internal parameters to controller
+  CONZ_ON : BOOL ;    //control zone active
+  CON_ZONE : REAL ;    //control zone
+END_VAR
+VAR
+  Zustand : STRUCT    
+   null : STRUCT    
+    x : REAL ;   
+    y : REAL ;   
+   END_STRUCT ;   
+   alt : STRUCT    
+    x : REAL ;   
+    y : REAL ;   
+    w : REAL ;   
+   END_STRUCT ;   
+   filt : STRUCT    
+    x : REAL ;   
+    y : REAL ;   
+   END_STRUCT ;   
+   filt_alt : STRUCT    
+    x : REAL ;   
+    y : REAL ;   
+   END_STRUCT ;   
+   stat : STRUCT    
+    x : REAL ;   
+    y : REAL ;   
+   END_STRUCT ;   
+   dxfiltdt_alt : REAL ;   
+   y_heiz : REAL ;   
+  END_STRUCT ;   
+  t : REAL ;   
+  tsprung : REAL ;   
+  sprunghoehe : REAL ;   
+  thilf1 : REAL ;   
+  thilf2 : REAL ;   
+  dxdtmax : REAL ;   
+  dxdtmin : REAL ;   
+  xw : REAL ;   
+  dxdtw : REAL ;   
+  n : INT  := 8;   
+  iPhase : INT ;   
+  wendephase : INT ;   
+  t_nadapt_alt : REAL ;   
+  bTunOn : BOOL ;   
+  bAdaptOn : BOOL ;   
+  nptn : REAL ;   
+END_VAR
+VAR_TEMP
+  e : REAL ;    //Regelabweichung
+  i : INT ;   
+  dxdt : REAL ;   
+  kpk : REAL ;   
+  tn1 : REAL ;   
+  tn2 : REAL ;   
+  f : REAL ;   
+  gamma : REAL ;   
+  e8 : REAL ;    //prдdizierte bleibende regelabweichung
+  dxdtsprung_rel : REAL ;   
+  td_t2 : REAL ;   
+  fti : REAL ;   
+  dxfiltdt : REAL ;   
+  dufiltdt : REAL ;   
+  kpkmax : REAL ;   
+  rCycle : REAL ;    //Abtastzeit (in sec)
+  koeff : REAL ;   
+END_VAR
+BEGIN
+ 
+e:=SP-PV;
+rCycle:=DINT_TO_REAL(TIME_TO_DINT(CYCLE))/1000.0;
+SP_OUT:=SP;
+IF SAVE_PAR
+THEN
+    PI_CON_OLD.GAIN:=PI_CON.GAIN;
+    PI_CON_OLD.TI:=PI_CON.TI;
+    PID_CON_OLD.GAIN:=PID_CON.GAIN;
+    PID_CON_OLD.TI:=PID_CON.TI;
+    PID_CON_OLD.TD:=PID_CON.TD;
+    SAVE_PAR:=false;
+END_IF;
+ 
+IF ADAPT1ST
+THEN
+    ADAPT_ON:=true;
+    ADAPT1ST:=false;
+    t:=0.0;
+    n:=8;
+    t_nadapt_alt:=0.0;
+    Zustand.filt.x:=PV;
+    Zustand.filt.y:=LMN;
+    Zustand.alt.x:=PV;
+    PROCESS.GAIN:=9.990000e+002;
+    RATIOFAC:=1.0;
+    dxdt:=0.0;
+    STEADY:=false;
+    STATUS_H:=0;
+    STATUS_D:=0;
+    STATUS_C:=0;
+ELSE
+    t:=t+rCycle;
+    dxdt:=(PV-Zustand.alt.x)/rCycle;
+    Zustand.alt.x:=PV;
+    Zustand.filt_alt.x:=Zustand.filt.x;
+    Zustand.filt_alt.y:=Zustand.filt.y;
+    Zustand.filt.x:=(INT_TO_REAL(n-1)*Zustand.filt.x+PV)/INT_TO_REAL(n);
+    Zustand.filt.y:=(INT_TO_REAL(n-1)*Zustand.filt.y+LMN)/INT_TO_REAL(n);
+    dxfiltdt:=(Zustand.filt.x-Zustand.filt_alt.x)/rCycle;
+    dufiltdt:=(Zustand.filt.y-Zustand.filt_alt.y)/rCycle;
+    IF SP<>Zustand.alt.w
+    THEN
+        QWRITE:=true;
+    ELSE
+        QWRITE:=false;
+    END_IF;
+END_IF;
+ 
+IF MAN_ON
+THEN
+    iPhase:=7;
+END_IF;
+ 
+ 
+IF iPhase=2
+THEN
+    PHASE:=2;
+    IF e<0.9*sprunghoehe AND e>0.8*sprunghoehe  AND n<120 AND bTunOn
+    THEN
+        dxdtsprung_rel:=ABS(dxfiltdt-Zustand.dxfiltdt_alt)/dxfiltdt;
+        Zustand.dxfiltdt_alt:=dxfiltdt;
+        IF dxdtsprung_rel>0.015 AND dxdtsprung_rel<100.0  AND (t-t_nadapt_alt)>INT_TO_REAL(2*n)*rCycle
+        THEN
+            n:=n*2;
+            t_nadapt_alt:=t;
+        END_IF;
+    ELSIF e<7.500000e-001*sprunghoehe
+    THEN
+        IF dxfiltdt<dxdtmax
+        THEN
+            IF wendephase=0
+            THEN
+                wendephase:=1;
+            ELSIF wendephase=1
+            THEN
+                wendephase:=2;
+            END_IF;
+        ELSE
+            dxdtmax:=dxfiltdt;
+            IF wendephase=1
+            THEN
+                wendephase:=0;
+            END_IF;
+        END_IF;
+       
+        IF wendephase=2 OR e<3.000000e-001*sprunghoehe
+        THEN
+            xw:=PV;
+            dxdtw:=dxdtmax;
+            IF e<3.000000e-001*sprunghoehe
+            THEN
+                dxdtw:=dxdtw*1.150000e+000;
+                STATUS_H:=3;
+            ELSIF e>7.400000e-001*sprunghoehe
+            THEN
+                STATUS_H:=1;
+            ELSE
+                STATUS_H:=2;
+            END_IF;
+            thilf1:=(PV-Zustand.null.x)/dxdtw;
+            TU:=t-tsprung-thilf1;
+            IF TU<2.0*rCycle
+            THEN
+                TU:=(t-tsprung)/4.0;
+                STATUS_H:=STATUS_H+10;
+            END_IF;   
+            Zustand.y_heiz:=LMN;
+            PROCESS.KIG:=dxdtw/(Zustand.y_heiz-Zustand.null.y);
+            PROCESS.TM_LAG2:=TU;
+            PI_CON_OLD.GAIN:=PI_CON.GAIN;
+            PI_CON_OLD.TI:=PI_CON.TI;
+            PI_CON.TI:=1.000000e+001*PROCESS.TM_LAG2;
+            PI_CON.GAIN:= NORM_FAC*PI_CON.TI*(3.125000e-002/PROCESS.TM_LAG2/PROCESS.TM_LAG2/PROCESS.KIG);
+            IF PI_CON.GAIN/NORM_FAC<2.000000e-001
+            THEN
+                PI_CON.GAIN:=2.000000e-001*NORM_FAC;
+            ELSIF PI_CON.GAIN/NORM_FAC>2.000000e+001
+            THEN
+                PI_CON.GAIN:=2.000000e+001*NORM_FAC;
+            END_IF;
+            GAIN:=PI_CON.GAIN;
+            TI:=DINT_TO_TIME(REAL_TO_DINT(PI_CON.TI*1.000000e+003));
+            QI_SEL:=true;
+            QD_SEL:=false;
+            TD:=T#0MS;
+            MAN_OUT:=((Zustand.y_heiz+Zustand.null.y)*5.000000e-001+Zustand.y_heiz)*5.000000e-001;
+            iPhase:=30;
+            QMAN_ON:=true;
+            QWRITE:=true;
+        END_IF;
+    ELSE
+        ;       
+    END_IF;
+   
+ELSIF iPhase=30
+THEN
+    PHASE:=3;
+    QWRITE:=true;
+    MAN_OUT:=LMN;
+    QMAN_ON:=true;
+    iPhase:=31;
+ 
+ELSIF iPhase=31
+THEN     
+    PHASE:=3;
+    QWRITE:=true;
+    MAN_OUT:=LMN;
+    QMAN_ON:=false;
+    iPhase:=3;
+ 
+ELSIF iPhase=3
+THEN
+    PHASE:=3;
+    MAN_OUT:=Zustand.filt.y;
+    IF ABS(dxfiltdt)>1.000000e-001*dxdtw AND STEADY
+    THEN
+        STEADY:=false;
+    END_IF;
+   
+    IF ABS(e)<5.000000e-002*sprunghoehe    AND
+       ABS(SP-Zustand.filt.x)<0.01*sprunghoehe AND
+       ABS(dxdt)<0.1*dxdtw AND
+       ABS(dxfiltdt)<0.01*dxdtw AND
+       ABS(dufiltdt)*rCycle<1.000000e-002 OR
+       STEADY OR (t-tsprung)>3.000000e+001*PI_CON.TI
+    THEN
+        STEADY:=false;
+        kpk:=(Zustand.filt.x-Zustand.null.x)/(Zustand.filt.y-Zustand.null.y);
+        thilf2:=((Zustand.y_heiz-Zustand.null.y)*kpk+Zustand.null.x-xw)/dxdtw;
+        IF (kpk>0.0) AND (kpk<1000.0)
+        THEN
+            PROCESS.GAIN:=kpk;
+            PROCESS.PV00:=Zustand.null.x-PROCESS.GAIN*Zustand.null.y;
+        END_IF;
+        IF (kpk>0.0) AND (kpk<1000.0)
+        THEN
+            Zustand.stat.x:=Zustand.filt.x;
+            Zustand.stat.y:=Zustand.filt.y;
+            TA:=thilf1+thilf2;
+            kpkmax:=8.000000e+001;
+            IF TA/TU>9.64
+            THEN
+                f:=(TA/TU-8.0633)/1.191900e+000;
+                PROCESS.TM_LAG2:=TA/(f*1.0722+2.0982);
+                PROCESS.TM_LAG1:=f*PROCESS.TM_LAG2;
+                IF PROCESS.TM_LAG2<3.0*rCycle
+                THEN
+                    PROCESS.TM_LAG2:=3.0*rCycle;   
+                    f:=PROCESS.TM_LAG1/PROCESS.TM_LAG2;
+                END_IF;
+                PID_CON_OLD.GAIN:=PID_CON.GAIN;
+                PID_CON_OLD.TI:=PID_CON.TI;
+                PID_CON_OLD.TD:=PID_CON.TD;
+                PID_CON.GAIN:=32.1/PROCESS.GAIN*NORM_FAC;
+                td_t2:=-8.417/(f+10.66)+0.985;
+                PID_CON.TD:=td_t2*PROCESS.TM_LAG2;
+                fti:=0.1236*f+3.322;
+                PID_CON.TI:=fti*PID_CON.TD;
+                STATUS_D:=2;
+                IF f>40.0
+                THEN
+                    PID_CON.GAIN:=PID_CON.GAIN*1.3;
+                    STATUS_D:=1;
+                END_IF;
+                kpk:=PID_CON.GAIN*PROCESS.GAIN/NORM_FAC;
+                IF kpk>kpkmax
+                THEN
+                    kpk:=kpkmax;
+                    PID_CON.GAIN:=(kpk/PROCESS.GAIN)*NORM_FAC;
+                END_IF;
+                CON_ZONE:=100.0/PID_CON.GAIN*NORM_FAC;
+                IF     f>10.0
+                THEN
+                    CONZ_ON:=true;
+                    PID_CON.GAIN:=PID_CON.GAIN*1.5;
+                    PID_CON.TI:=0.6*PID_CON.TI;
+                ELSE
+                    CONZ_ON:=false;
+                END_IF;   
+               
+                PI_CON.GAIN:=(0.437*f-0.133)*NORM_FAC/PROCESS.GAIN;
+                fti:=-7.115/(f+2.6187)+3.0611;
+                PI_CON.TI:=(fti*2.0*f)/(1.0+f)*PROCESS.TM_LAG2;
+            ELSE
+                CONZ_ON:=false;
+                PI_CON_OLD.GAIN:=PI_CON.GAIN;
+                PI_CON_OLD.TI:=PI_CON.TI;
+                PID_CON_OLD.GAIN:=PID_CON.GAIN;
+                PID_CON_OLD.TI:=PID_CON.TI;
+                PID_CON_OLD.TD:=PID_CON.TD;
+                nptn:=7.9826/(TA/TU-0.3954)+1.1099;
+                nptn:=ROUND(nptn+0.4);
+                PROCESS.TM_LAG1:=TU/(nptn*0.0165*nptn+0.5078*nptn-0.8387);
+                PROCESS.TM_LAG2:=PROCESS.TM_LAG1;
+                PI_CON.GAIN:=((2.0+nptn)*NORM_FAC/(nptn-1.0))/4.0/PROCESS.GAIN;
+                PI_CON.TI:=(2.0+nptn)*PROCESS.TM_LAG1/3.0;
+                koeff:=7.0*nptn+16.0;
+                IF nptn=2.0
+                THEN
+                    PID_CON.GAIN:=2.3125*NORM_FAC/PROCESS.GAIN;
+                ELSE
+                    PID_CON.GAIN:=NORM_FAC*koeff /(nptn-2.0)/16.0/PROCESS.GAIN;
+                END_IF;     
+                PID_CON.TI:=koeff*PROCESS.TM_LAG1/15.0;
+                PID_CON.TD:=(1.0+nptn)*(3.0+nptn)*PROCESS.TM_LAG1/koeff;
+                STATUS_D:=3;
+            END_IF;
+            kpk:=PI_CON.GAIN*PROCESS.GAIN;   
+            IF kpk>kpkmax
+            THEN
+                kpk:=kpkmax;
+                PI_CON.GAIN:=kpk*NORM_FAC/PROCESS.GAIN;
+            END_IF;
+            QMAN_ON:=true;
+            QWRITE:=true;
+            MAN_OUT:=LMN;   
+            iPhase:=40;
+        ELSE
+            iPhase:=4;
+            STATUS_D:=4;
+        END_IF;
+        bAdaptOn:=false;
+        bTunOn:=false;   
+    END_IF; 
+   
+ELSIF iPhase=38
+THEN     
+    PHASE:=3;
+    IF dxfiltdt>dxdtmin AND PV<0.9*SP
+    THEN
+        IF wendephase=0
+        THEN
+            wendephase:=1;
+        ELSIF wendephase=1
+        THEN
+            wendephase:=2;
+        END_IF;
+    ELSE
+        dxdtmin:=dxfiltdt;
+        IF wendephase=1
+        THEN
+            wendephase:=0;
+        END_IF;   
+    END_IF; 
+   
+    IF wendephase=2 OR PV<0.7*SP
+    THEN
+        IF wendephase<2
+        THEN
+            dxdtmin:=dxdtmin*1.1;
+            STATUS_C:=1;
+        ELSE
+            STATUS_C:=2;
+        END_IF;
+        PROCESS.KIG_C:=-9.990000e+002;
+        IF LMN<0.0 AND RATIOFAC<>0.0
+        THEN
+            PROCESS.KIG_C:=(PROCESS.KIG*Zustand.stat.y+dxdtmin)/(LMN*RATIOFAC);
+        END_IF;   
+       
+        IF PROCESS.KIG_C<0.0
+        THEN
+            PROCESS.KIG_C:=PROCESS.KIG;
+            STATUS_C:=STATUS_C+10;
+        END_IF;   
+        RATIOFAC:=PROCESS.KIG/PROCESS.KIG_C;
+        MAN_OUT:=Zustand.stat.y;
+        iPhase:=39;
+        QWRITE:=true;
+    END_IF;      
+ 
+ELSIF iPhase=39
+THEN     
+    PHASE:=3;
+    QWRITE:=true;
+    MAN_OUT:=Zustand.stat.y;
+    IF NOT WRITE_DIS
+    THEN
+        iPhase:=42;
+    END_IF;
+ 
+ELSIF iPhase=40
+THEN     
+    PHASE:=4;
+    QWRITE:=true;
+    TD:=T#0MS;
+    QD_SEL:=false;
+    IF NOT WRITE_DIS
+    THEN
+        iPhase:=41;
+    END_IF;
+   
+ELSIF iPhase=41
+THEN     
+    PHASE:=4;
+    QWRITE:=true;
+    IF NOT ADAPT_ON AND PID_ON
+    THEN
+        GAIN:=PID_CON.GAIN;
+        TI:=DINT_TO_TIME(REAL_TO_DINT(PID_CON.TI*1000.0));
+        TD:=DINT_TO_TIME(REAL_TO_DINT(PID_CON.TD*1000.0));
+        IF PID_CON.TD=0.0
+        THEN
+            TM_LAG:=T#1S;
+        ELSE
+            TM_LAG:=DINT_TO_TIME(REAL_TO_DINT(PID_CON.TD*200.0));
+        END_IF;
+        QI_SEL:=true;
+        QD_SEL:=true;
+    ELSE    
+        GAIN:=PI_CON.GAIN;
+        TI:=DINT_TO_TIME(REAL_TO_DINT(PI_CON.TI*1000.0));
+        TD:=T#0MS;
+        TM_LAG:=T#1S;
+        QI_SEL:=true;
+        QD_SEL:=false;
+    END_IF; 
+    MAN_OUT:=LMN;
+    QMAN_ON:=true;
+    IF NOT WRITE_DIS
+    THEN
+        iPhase:=42;
+    END_IF;   
+ELSIF iPhase=42
+THEN     
+    PHASE:=4;
+    QWRITE:=true;
+    MAN_OUT:=LMN;
+    QMAN_ON:=false;
+    IF NOT WRITE_DIS
+    THEN
+        iPhase:=4;
+    END_IF;   
+ 
+ELSIF iPhase=4
+THEN     
+    PHASE:=4;
+    t:=0.0;   
+    MAN_OUT:=Zustand.filt.y;
+    IF (NOT QD_SEL AND PID_ON AND NOT ADAPT_ON) OR
+        (NOT PID_ON AND QD_SEL) OR
+        (ADAPT_ON AND QD_SEL) OR
+        NOT QI_SEL
+    THEN
+        iPhase:=40;
+    END_IF;
+    IF LOAD_PAR   
+    THEN
+        LOAD_PAR:=false;
+        iPhase:=40;
+    END_IF;
+    IF STEADY
+    THEN
+        iPhase:=3;
+    END_IF;
+    IF UNDO_PAR   
+    THEN
+        PI_CON.GAIN:=PI_CON_OLD.GAIN;
+        PI_CON.TI:=PI_CON_OLD.TI;
+        IF PID_CON_OLD.GAIN<>0.0
+        THEN
+            PID_CON.GAIN:=PID_CON_OLD.GAIN;
+            PID_CON.TI:=PID_CON_OLD.TI;
+            PID_CON.TD:=PID_CON_OLD.TD;
+        END_IF;
+        UNDO_PAR:=false;
+        iPhase:=40;   
+    END_IF;
+    IF CONZ_ON
+    THEN
+        IF e>CON_ZONE
+        THEN
+            MAN_OUT:=100.0;
+            QMAN_ON:=true;
+            QWRITE:=true;
+            iPhase:=45;
+        ELSE
+            IF e<-CON_ZONE/RATIOFAC*1.5
+            THEN
+                MAN_OUT:=-100.0;
+                QMAN_ON:=true;
+                QWRITE:=true;
+                iPhase:=45;
+            END_IF;
+        END_IF;
+    END_IF; 
+   
+    IF NOT ADAPT_ON AND COOLID_ON
+    THEN
+        COOLID_ON:=false;
+        MAN_OUT:=LLLM_TUN;
+        QMAN_ON:=true;
+        QWRITE:=true;
+        Zustand.stat.x:=Zustand.filt.x;
+        Zustand.stat.y:=Zustand.filt.y;
+        wendephase:=0;
+        dxdtmin:=999.0;
+        tsprung:=t;
+        iPhase:=38;
+        STATUS_C:=0;
+    END_IF;
+       
+    IF (SP-Zustand.alt.w)>=MIN_STEP AND (SP-PV)>=MIN_STEP
+    THEN
+        sprunghoehe:=SP-PV;
+        tsprung:=t;
+        Zustand.null.x:=Zustand.filt.x;
+        Zustand.null.y:=Zustand.filt_alt.y;
+        IF ADAPT_ON
+        THEN
+            ADAPT_ON:=false;
+            dxdtmax:=-99.0;
+            wendephase:=0;
+            STATUS_H:=0;
+            f:=PROCESS.TM_LAG1/PROCESS.TM_LAG2;
+            IF PROCESS.GAIN<>999.0 AND f>1.0
+            THEN
+                bAdaptOn:=true;
+               
+                Zustand.y_heiz:=(0.5*sprunghoehe/PROCESS.GAIN)/
+                                (1.0-(f/(f-1.0)*EXP(-LN(f)/(f-1.0)))+
+                                (1.0/(f-1.0))*EXP(-f*LN(f)/(f-1.0)))
+                                +Zustand.null.y;
+                               
+                Zustand.y_heiz:=Zustand.y_heiz*0.8;
+                IF Zustand.y_heiz<1.1*Zustand.null.y
+                THEN
+                    Zustand.y_heiz:=1.1*Zustand.null.y;
+                END_IF;
+                Zustand.y_heiz:=DINT_TO_REAL(REAL_TO_DINT((Zustand.y_heiz+2.5)/5.0)*5);
+            ELSE
+                bTunOn:=true;
+                n:=8;
+                Zustand.y_heiz:=LHLM_TUN;
+                STATUS_D:=0;
+            END_IF;
+            QMAN_ON:=true;
+            MAN_OUT:=Zustand.y_heiz;
+            iPhase:=2;
+            QWRITE:=true;
+        ELSIF PROCESS.GAIN<>999.0 AND STRUC_ON AND NOT CONZ_ON
+        THEN
+            QWRITE:=true;
+            IF GAIN*PROCESS.GAIN/NORM_FAC>5.0
+            THEN
+                QI_SEL:=false;
+                TI:=T#0MS;
+                GAIN:=GAIN*1.5;
+                iPhase:=5;
+            ELSE   
+                QMAN_ON:=true;
+                MAN_OUT:=(SP-Zustand.stat.x)/PROCESS.GAIN+Zustand.stat.y;
+                iPhase:=6;
+            END_IF; 
+        ELSE
+            ;   
+        END_IF;
+    END_IF;
+ 
+ELSIF iPhase=45
+THEN
+    PHASE:=4;
+    IF (e<CON_ZONE AND e>-CON_ZONE/RATIOFAC*1.5) OR
+       ((Zustand.alt.w-Zustand.alt.x)<0.0 AND (SP-PV)>0.0)
+        OR
+       ((Zustand.alt.w-Zustand.alt.x)>0.0 AND (SP-PV)<0.0)
+    THEN
+        MAN_OUT:=MAN;
+        QMAN_ON:=false;
+        QWRITE:=true;
+        iPhase:=4;
+    END_IF;   
+ 
+ELSIF iPhase=5
+THEN 
+    PHASE:=5;   
+    e8:=(SP-PROCESS.PV00)/(GAIN*PROCESS.GAIN/NORM_FAC+1.0);
+    IF e<e8*1.1 OR (t-tsprung)>(3.0*PI_CON.TI)
+    THEN
+        iPhase:=40;
+    END_IF;
+      
+ELSIF iPhase=6
+THEN    
+    PHASE:=6;
+    IF Zustand.alt.w<>SP
+    THEN
+        MAN_OUT:=(SP-Zustand.stat.x)/PROCESS.GAIN+Zustand.stat.y;
+        QWRITE:=true;
+    END_IF; 
+    IF (e<0.05*sprunghoehe OR (t-tsprung)>3.0*TA) OR
+       (dxfiltdt<-1.000000e-002*dxdtw AND e>0.0  AND e<0.7*sprunghoehe)
+    THEN
+        QMAN_ON:=false;
+        QWRITE:=true;
+        iPhase:=4;
+    END_IF;   
+ 
+ELSIF iPhase=7
+THEN   
+    PHASE:=7;
+    QWRITE:=true;
+    QMAN_ON:=MAN_ON;
+    MAN_OUT:=MAN;
+    SP_OUT:=PV;
+    bAdaptOn:=false;
+    bTunOn:=false;
+    IF NOT MAN_ON
+    THEN
+        IF ADAPT_ON OR STRUC_ON
+        THEN
+            iPhase:=4;
+        ELSE
+            IF PROCESS.GAIN<>9.990000e+002 AND PRED_ON
+            THEN
+                QMAN_ON:=true;
+                MAN_OUT:=(SP-Zustand.stat.x)/PROCESS.GAIN+Zustand.stat.y;
+            END_IF;   
+            iPhase:=41;
+        END_IF;
+    END_IF;
+END_IF;   
+Zustand.alt.y:=LMN;
+Zustand.alt.w:=SP_OUT;
+ 
+END_FUNCTION_BLOCK

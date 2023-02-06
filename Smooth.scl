@@ -1,0 +1,194 @@
+// {
+Scl_ResetOptions ;
+Scl_OverwriteBlocks:=           'y' ;
+Scl_GenerateReferenceData :=    'y' ;
+Scl_S7ServerActive:=            'y' ;
+Scl_CreateObjectCode:=          'y' ;
+Scl_OptimizeObjectCode:=        'y' ;
+Scl_MonitorArrayLimits:=        'n' ;
+Scl_CreateDebugInfo :=          'n' ;
+Scl_SetOKFlag:=                 'n' ;
+Scl_SetMaximumStringLength:=    '254'
+}
+FUNCTION_BLOCK FB11890
+TITLE ='Signal Smoothing'
+{ S7_alarm_ui := '0'; S7_tasklist := 'OB100' }
+AUTHOR : AdvLib80
+FAMILY : Math
+NAME : Smooth
+VERSION : '2.1'
+//reversed by komatic
+ 
+VAR_INPUT
+  PV { S7_dynamic := 'true' }: STRUCT     //Analog input (process value)
+   Value : REAL ;    // Value
+   ST : BYTE  := B#16#80;    // Signal Status
+  END_STRUCT ;   
+  TimeConstant { S7_visible := 'true'; S7_dynamic := 'true'; S7_edit := 'para' }: REAL  := 1.000000e+001;    //Filter time constant [s] for Butterworth
+  OutlThreshold { S7_dynamic := 'true' }: REAL  := 1.000000e+001;    //Threshold of the outlier detection  
+  OutlCycles { S7_visible := 'true' }: INT  := 3;    //Number of cycles to hold outlier
+  SampleTime { S7_visible := 'false'; S7_link := 'false'; S7_sampletime := 'true'; S7_param := 'false' }: REAL  := 1.000000e+000;    //Sample Time [s]
+  Feature { S7_visible := 'false' }: STRUCT     //Status of various features, only provided for future extensions
+   Bit0 : BOOL ;    //Reserved
+   Bit1 : BOOL ;    //Reserved
+   Bit2 : BOOL ;    //Reserved
+   Bit3 : BOOL ;    //Reserved
+   Bit4 : BOOL ;    //Reserved
+   Bit5 : BOOL ;    //Reserved
+   Bit6 : BOOL ;    //Reserved
+   Bit7 : BOOL ;    //Reserved
+   Bit8 : BOOL ;    //Reserved
+   Bit9 : BOOL ;    //Reserved
+   Bit10 : BOOL ;    //Reserved
+   Bit11 : BOOL ;    //Reserved
+   Bit12 : BOOL ;    //Reserved
+   Bit13 : BOOL ;    //Reserved
+   Bit14 : BOOL ;    //Reserved
+   Bit15 : BOOL ;    //Reserved
+   Bit16 : BOOL ;    //Reserved
+   Bit17 : BOOL ;    //Reserved
+   Bit18 : BOOL ;    //Reserved
+   Bit19 : BOOL ;    //Reserved
+   Bit20 : BOOL ;    //Reserved
+   Bit21 : BOOL ;    //Reserved
+   Bit22 : BOOL ;    //Reserved
+   Bit23 : BOOL ;    //Reserved
+   Bit24 : BOOL ;    //Reserved
+   Bit25 : BOOL ;    //Reserved
+   Bit26 : BOOL ;    //Reserved
+   Bit27 : BOOL ;    //Reserved
+   Bit28 : BOOL ;    //Reserved
+   Bit29 : BOOL ;    //Reserved
+   Bit30 : BOOL ;    //Reserved
+   Bit31 : BOOL ;    //Reserved
+  END_STRUCT ;   
+  OutlDetOn { S7_dynamic := 'true' }: BOOL ;    //1 = Outlier detection on 
+  FilterOn { S7_dynamic := 'true' }: BOOL  := TRUE;    //1 = Filter on
+  Restart : BOOL  := TRUE;    //1 = Restart filter algorithm and reset internal memory
+END_VAR
+VAR_OUTPUT
+  CleanPV { S7_dynamic := 'true' }: STRUCT     //output value         
+   Value : REAL ;    // Value
+   ST : BYTE  := B#16#80;    // Signal Status
+  END_STRUCT ;   
+  OutlDetected { S7_dynamic := 'true' }: BOOL ;    //1: Outlier detected
+  ErrorNum { S7_visible := 'false'; S7_dynamic := 'true' }: INT ;    //Parametrization Error
+END_VAR
+VAR
+  xx : ARRAY  [1 .. 2 ] OF REAL  := 2 (0.000000e+000) ;   
+  b0 : REAL ;    //internal coefficients of butterworth filter
+  b1 : REAL ;   
+  b2 : REAL ;   
+  aa1 : REAL ;   
+  aa2 : REAL ;   
+  TimeConstantOld : REAL ;   
+  SampleTimeOld : REAL ;   
+  PV_DelieredOld : REAL ;   
+  OutlCount : INT ;   
+  _reserve : ARRAY  [0 .. 7 ] OF BYTE  := B#16#0;   
+END_VAR
+VAR_TEMP
+  stcTOP_SI : STRUCT    
+   EV_CLASS : BYTE ;    // Bits 0 to 3: Event ID·  Bits 4 to 7: Event class
+   EV_NUM : BYTE ;    // Event number
+   PRIORITY : BYTE ;    // Number of the priority class (meaning OF B#16#FE: OB NOT available or locked)
+   NUM : BYTE ;    // OB number.
+   TYP2_3 : BYTE ;    // Data ID 2_3: identifies the information entered in ZI2_3
+   TYP1 : BYTE ;    // Data ID 1  : identifies the information entered in ZI1
+   ZI1 : WORD ;    // Additional information 1
+   ZI2_3 : DWORD ;    // Additional information 2_3
+  END_STRUCT ;   
+  stcSTART_UP_SI : STRUCT    
+   EV_CLASS : BYTE ;    // Bits 0 to 3: Event ID·  Bits 4 to 7: Event class
+   EV_NUM : BYTE ;    // Event number
+   PRIORITY : BYTE ;    // Number of the priority class (meaning OF B#16#FE: OB NOT available or locked)
+   NUM : BYTE ;    // OB number.
+   TYP2_3 : BYTE ;    // Data ID 2_3: identifies the information entered in ZI2_3
+   TYP1 : BYTE ;    // Data ID 1  : identifies the information entered in ZI1
+   ZI1 : WORD ;    // Additional information 1
+   ZI2_3 : DWORD ;    // Additional information 2_3
+  END_STRUCT ;   
+  l : REAL ;   
+  nenner : REAL ;   
+  PV_Deliered : REAL ;   
+  PV_Filtered : REAL ;   
+  rTimeConstant : REAL ;   
+  rSampleTime : REAL ;   
+  i : INT ;   
+  nTemp : INT ;    //Temporary variable, Error SFC/SFB call
+END_VAR
+BEGIN
+ 
+nTemp:=RD_SINFO(TOP_SI :=  stcTOP_SI
+         ,START_UP_SI :=  stcSTART_UP_SI
+         );
+ 
+IF (stcTOP_SI.NUM=B#16#64 OR Restart) OR 
+   (TimeConstant<>TimeConstantOld) OR
+   (SampleTime<>SampleTimeOld) OR
+   (ErrorNum<>0)
+THEN
+    ErrorNum:=0;
+    Restart:=false;
+    OutlCount:=OutlCycles;
+    rSampleTime:=SampleTime;
+    IF rSampleTime<1.000000e-003 THEN
+        rSampleTime:=1.000000e-003;
+        ErrorNum:=2;
+    END_IF;
+    rTimeConstant:=TimeConstant;
+    IF rTimeConstant<5.0*rSampleTime THEN
+        rTimeConstant:=5.0*rSampleTime;
+        ErrorNum:=61;
+    END_IF;
+    PV.Value:=ChkREAL(In :=  PV.Value,ErrNum :=  nTemp);
+    IF nTemp=1 OR nTemp=3 THEN
+        ErrorNum:=30;
+        PV.Value:=PV_DelieredOld;
+    END_IF;
+    PV_Filtered:=PV.Value;
+    l:=1.0/(TAN(3.141592*rSampleTime/rTimeConstant));
+    nenner:=l*1.41421356+1.0+l**2;
+    aa1:=(1.0-l**2)*2.0/nenner;
+    aa2:=((1.0-1.41421356*l)+l**2)/nenner;
+    b0:=1.0/nenner;
+    b1:=b0*2.0;
+    b2:=b0;
+    xx[2]:=(1.0-b2)*PV.Value;
+    xx[1]:=(-aa2)*xx[2] + (b2-b0*aa2)*PV.Value;
+    PV_Deliered:=PV.Value;
+ELSE
+    ErrorNum:=0;
+    PV.Value:=ChkREAL(In :=  PV.Value,ErrNum :=  nTemp);
+    IF nTemp=1 OR nTemp=3 THEN
+        ErrorNum:=30;
+        PV.Value:=PV_DelieredOld;
+    END_IF;
+    IF OutlDetOn THEN
+        OutlDetected:=OutlCount>=0 AND ABS(PV.Value-PV_DelieredOld)>ABS(OutlThreshold);
+        IF OutlDetected THEN
+            OutlCount:=OutlCount-1;
+            PV_Deliered:=PV_DelieredOld;
+        ELSE
+            OutlCount:=OutlCycles;
+            PV_Deliered:=PV.Value;
+        END_IF;
+    ELSE
+        PV_Deliered:=PV.Value;
+        OutlDetected:=false;
+    END_IF;
+    PV_Filtered:=b0*PV_Deliered+xx[2];
+    nenner:=xx[1];
+    xx[1]:=(-aa2)*xx[2] + (b2-b0*aa2)*PV_Deliered;
+    xx[2]:=(nenner-aa1*xx[2]) + (b1-b0*aa1)*PV_Deliered;
+    IF FilterOn THEN
+        CleanPV.Value:=PV_Filtered;
+    ELSE
+        CleanPV.Value:=PV_Deliered;
+    END_IF;
+    CleanPV.ST:=PV.ST;
+END_IF;
+TimeConstantOld:=TimeConstant;
+SampleTimeOld:=SampleTime;
+PV_DelieredOld:=PV_Deliered;
+END_FUNCTION_BLOCK

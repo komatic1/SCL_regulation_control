@@ -1,0 +1,90 @@
+FUNCTION_BLOCK FB100
+TITLE ='process for continuous control' 
+AUTHOR : SIMATIC
+FAMILY : PROCESS
+NAME : PROC_C
+VERSION : '2.0' 
+//reversed by komatic 
+VAR_INPUT  
+        INV                     : REAL ;                        //входная переменная
+        DISV                    : REAL ;                        //переменная возмущения  
+        AMB_TEM                 : REAL  := 2.000000e+001;       //температура окружающей среды  
+        GAIN                    : REAL  := 1.500000e+000;       //кфт пропорциональности  
+        TM_LAG1                 : REAL  := 6.000000e+001;       //время задержки 1 [s]  
+        TM_LAG2                 : REAL  := 1.000000e+001;       //время задержки 2 [s]  
+        TM_LAG3                 : REAL ;                        //время задержки 3 [s]  
+        CYCLE                   : REAL  := 1.000000e-001;       //время выполнения блока [s]
+END_VAR
+VAR_OUTPUT  
+        OUTV                    : REAL ;                        //выходная переменная
+END_VAR
+VAR_IN_OUT  
+        COM_RST                 : BOOL;                         //полный рестарт
+END_VAR
+VAR  
+        sRueck1                 : REAL;                         //Rьckkopplungswert 1  
+        sRueck2                 : REAL;                         //Rьckkopplungswert 2  
+        sRueck3                 : REAL;                         //Rьckkopplungswert 3
+END_VAR
+VAR_TEMP  
+        Hvar                    : REAL ;                        //вспомогательная переменная  
+        rCycle                  : REAL;                         //время цикла вreal   
+        rTmLag1                 : REAL;                         //время задержки 1 in real  
+        rTmLag2                 : REAL;                         //время задержки 2 in real  
+        rTmLag3                 : REAL;                         //время задержки 3 in real  
+        OutvNew                 : REAL;                         //новое значение выхода
+END_VAR
+BEGIN 
+OutvNew:=(INV+DISV)*GAIN; 
+IF COM_RST
+THEN     OUTV:=OutvNew+AMB_TEM;    
+        sRueck1:=OutvNew;    
+        sRueck2:=OutvNew;    
+        sRueck3:=OutvNew;    
+COM_RST:=0;
+ELSE     
+        rCycle:=CYCLE;    
+        rTmLag1:=TM_LAG1;    
+        rTmLag2:=TM_LAG2;    
+        rTmLag3:=TM_LAG3;        
+
+        IF rCycle < 1.000000e-003
+        THEN
+            rCycle:=1.000000e-003
+        END_IF;
+       
+        IF rTmLag1>=rCycle*5.000000e-001    
+        THEN        
+                Hvar:= rCycle/(rTmLag1 * 2.0 +rCycle);        
+                Hvar:=(OutvNew-sRueck1)*Hvar;        
+                OutvNew:=Hvar+sRueck1;        
+                sRueck1:=2.0 *Hvar+sRueck1;    
+        ELSE        
+                Hvar:=rCycle/(rTmLag1+rCycle);        
+                sRueck1:=(OutvNew-sRueck1)*Hvar+sRueck1;        
+                OutvNew:=sRueck1;    
+        END_IF;  
+                
+        IF rTmLag2>=rCycle*5.000000e-001     
+        THEN        
+                Hvar:=rCycle / (rTmLag2*2.0 +rCycle);        
+                Hvar:=(OutvNew - sRueck2)*Hvar;        
+                OutvNew:=Hvar+sRueck2;        
+                sRueck2:=2.0 *Hvar+sRueck2;    
+        ELSE        
+                sRueck2:=OutvNew;    
+        END_IF;  
+                        
+        IF rTmLag3>=rCycle*5.000000e-001     
+        THEN         
+                Hvar:=rCycle/ (rTmLag3*2.0 +rCycle);        
+                Hvar:=(OutvNew - sRueck3)*Hvar;        
+                OutvNew:=Hvar+sRueck3;        
+                sRueck3:=2.0 *Hvar+sRueck3;    
+        ELSE        
+                sRueck3:=OutvNew;    
+        END_IF;     
+        OUTV:=OutvNew+AMB_TEM;    
+         
+END_IF;  
+END_FUNCTION_BLOCK 
